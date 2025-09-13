@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Camera Stream Test</title>
+    <style>
+        body {
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        img {
+            max-width: 100%;
+            border: 2px solid #4a9eff;
+        }
+        .status {
+            margin: 20px;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <h1>Direct Camera Stream Test</h1>
+    <div class="status" id="status">Loading stream...</div>
+    <img id="stream" src="http://localhost:3001/stream.mjpeg" 
+         onload="document.getElementById('status').textContent = '✅ Stream Connected!'"
+         onerror="document.getElementById('status').textContent = '❌ Stream Failed - Check proxy server'">
+    <p>This should show your camera feed directly from the proxy at localhost:3001</p>
+</body>
+</html>

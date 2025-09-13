@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SmolVLM Live Robot Monitor</title>
+    <style>
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            gap: 20px;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .video-container {
+            position: relative;
+            background: #111;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        
+        #stream {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .status-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+        
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4ade80;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .analysis-panel {
+            width: 400px;
+            background: #111;
+            border-radius: 12px;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        
+        .analysis-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .brain-icon {
+            font-size: 24px;
+        }
+        
+        .analysis-entry {
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 3px solid #4a9eff;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .analysis-entry.alert {
+            border-left-color: #ef4444;
+            background: #1f1414;
+        }
+        
+        .analysis-entry.success {
+            border-left-color: #4ade80;
+            background: #141f14;
+        }
+        
+        .analysis-time {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .analysis-text {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .analysis-confidence {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        
+        .control-bar {
+            background: #111;
+            border-radius: 12px;
+            padding: 15px 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            background: #3a8eef;
+            transform: translateY(-1px);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            background: #333;
+            cursor: not-allowed;
+        }
+        
+        .motion-indicator {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 14px;
+        }
+        
+        .motion-bar {
+            width: 100px;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .motion-level {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(to right, #4ade80, #facc15, #ef4444);
+            transition: width 0.3s;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        #canvas {
+            position: absolute;
+            top: -9999px;
+        }
+        
+        .announcement {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.9);
+            border-radius: 8px;
+            padding: 15px;
+            display: none;
+            animation: announceIn 0.5s ease-out;
+        }
+        
+        @keyframes announceIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .announcement.show {
+            display: block;
+        }
+        
+        .announcement-text {
+            font-size: 18px;
+            font-weight: 500;
+        }
+        
+        .announcement.success {
+            background: rgba(74, 222, 128, 0.9);
+            color: #000;
+        }
+        
+        .announcement.alert {
+            background: rgba(239, 68, 68, 0.9);
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="video-container">
+            <img id="stream" src="http://localhost:3001/stream.mjpeg" alt="Robot Camera Feed">
+            <div class="status-bar">
+                <div class="status">
+                    <div class="status-indicator"></div>
+                    <span id="connectionStatus">Connecting...</span>
+                </div>
+                <div class="stats">
+                    <span>FPS: <span id="fps">0</span></span>
+                    <span>Analyzed: <span id="analyzed">0</span></span>
+                </div>
+            </div>
+            <div class="announcement" id="announcement">
+                <div class="announcement-text" id="announcementText"></div>
+            </div>
+        </div>
+        
+        <div class="control-bar">
+            <div class="control-group">
+                <button id="analyzeBtn" onclick="analyzeNow()">Analyze Now</button>
+                <button id="pauseBtn" onclick="togglePause()">Pause Analysis</button>
+            </div>
+            
+            <div class="motion-indicator">
+                <span>Motion:</span>
+                <div class="motion-bar">
+                    <div class="motion-level" id="motionLevel"></div>
+                </div>
+                <span id="motionPercent">0%</span>
+            </div>
+            
+            <div class="control-group">
+                <label style="font-size: 14px;">
+                    <input type="checkbox" id="soundEnabled" checked> Sound
+                </label>
+            </div>
+        </div>
+    </div>
+    
+    <div class="analysis-panel">
+        <div class="analysis-header">
+            <span class="brain-icon">🧠</span>
+            <h2 style="margin: 0;">SmolVLM Analysis</h2>
+        </div>
+        <div id="analysisResults"></div>
+    </div>
+    
+    <canvas id="canvas"></canvas>
+    
+    <script>
+        // Configuration
+        const SMOLVLM_URL = 'http://localhost:8080/v1/chat/completions';
+        const THROTTLE_DELAY = 15000; // 15 seconds for idle
+        const MOTION_THRESHOLD = 10; // Percentage threshold for motion detection
+        const MAX_ANALYSIS_ENTRIES = 20;
+        
+        // State
+        let isPaused = false;
+        let lastAnalysisTime = 0;
+        let frameCount = 0;
+        let lastFrameTime = Date.now();
+        let motionLevel = 0;
+        let previousFrame = null;
+        let analysisCount = 0;
+        
+        // DOM elements
+        const stream = document.getElementById('stream');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const analysisResults = document.getElementById('analysisResults');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const announcement = document.getElementById('announcement');
+        const announcementText = document.getElementById('announcementText');
+        
+        // Analysis prompts for different scenarios
+        const PROMPTS = {
+            general: "You are monitoring robots in a pen. Describe what you see, focusing on robot activities and any notable events.",
+            motion: "Motion detected! What's happening with the robots? Are they performing any tasks or movements?",
+            periodic: "Periodic check: What's the current status of all robots? Any issues or achievements?",
+            task: "Look for task completion: Has any robot picked up or placed a ball? Has anyone scored by dropping a ball in a cup?"
+        };
+        
+        // Initialize
+        stream.onload = () => {
+            connectionStatus.textContent = '✅ Stream Connected';
+            canvas.width = stream.width;
+            canvas.height = stream.height;
+            startMonitoring();
+        };
+        
+        stream.onerror = () => {
+            connectionStatus.textContent = '❌ Stream Failed';
+        };
+        
+        // Main monitoring loop
+        function startMonitoring() {
+            setInterval(() => {
+                if (!isPaused) {
+                    captureFrame();
+                    updateFPS();
+                    checkMotion();
+                    checkForAnalysis();
+                }
+            }, 100); // 10 FPS for motion detection
+        }
+        
+        // Capture current frame
+        function captureFrame() {
+            ctx.drawImage(stream, 0, 0, canvas.width, canvas.height);
+        }
+        
+        // Update FPS counter
+        function updateFPS() {
+            frameCount++;
+            const now = Date.now();
+            if (now - lastFrameTime > 1000) {
+                document.getElementById('fps').textContent = frameCount;
+                frameCount = 0;
+                lastFrameTime = now;
+            }
+        }
+        
+        // Motion detection
+        function checkMotion() {
+            if (!previousFrame) {
+                previousFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                return;
+            }
+            
+            const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const motion = calculateMotion(previousFrame, currentFrame);
+            
+            motionLevel = motion;
+            document.getElementById('motionLevel').style.width = `${motion}%`;
+            document.getElementById('motionPercent').textContent = `${Math.round(motion)}%`;
+            
+            previousFrame = currentFrame;
+        }
+        
+        // Calculate motion between frames
+        function calculateMotion(frame1, frame2) {
+            let diff = 0;
+            const pixelCount = frame1.data.length / 4;
+            const sampleRate = 100; // Sample every 100th pixel for performance
+            
+            for (let i = 0; i < frame1.data.length; i += 4 * sampleRate) {
+                const r1 = frame1.data[i];
+                const g1 = frame1.data[i + 1];
+                const b1 = frame1.data[i + 2];
+                
+                const r2 = frame2.data[i];
+                const g2 = frame2.data[i + 1];
+                const b2 = frame2.data[i + 2];
+                
+                diff += Math.abs(r1 - r2) + Math.abs(g1 - g2) + Math.abs(b1 - b2);
+            }
+            
+            // Normalize to percentage
+            return Math.min(100, (diff / (pixelCount / sampleRate * 255 * 3)) * 100);
+        }
+        
+        // Check if analysis is needed
+        function checkForAnalysis() {
+            const now = Date.now();
+            const timeSinceLastAnalysis = now - lastAnalysisTime;
+            
+            // Analyze immediately on high motion
+            if (motionLevel > MOTION_THRESHOLD && timeSinceLastAnalysis > 2000) {
+                analyzeFrame('motion');
+            }
+            // Periodic analysis when idle
+            else if (timeSinceLastAnalysis > THROTTLE_DELAY) {
+                analyzeFrame('periodic');
+            }
+        }
+        
+        // Analyze current frame
+        async function analyzeFrame(type = 'general') {
+            lastAnalysisTime = Date.now();
+            
+            // Get image data
+            const imageData = canvas.toDataURL('image/jpeg', 0.8);
+            
+            try {
+                const response = await fetch(SMOLVLM_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'smolvlm-instruct',
+                        messages: [{
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: PROMPTS[type] || PROMPTS.general },
+                                { type: 'image_url', image_url: { url: imageData } }
+                            ]
+                        }],
+                        max_tokens: 150,
+                        temperature: 0.7
+                    })
+                });
+                
+                const data = await response.json();
+                const analysis = data.choices[0].message.content;
+                
+                processAnalysis(analysis, type);
+                analysisCount++;
+                document.getElementById('analyzed').textContent = analysisCount;
+                
+            } catch (error) {
+                console.error('Analysis error:', error);
+                addAnalysisEntry('Failed to analyze frame', 'error');
+            }
+        }
+        
+        // Process analysis result
+        function processAnalysis(analysis, type) {
+            // Add to analysis panel
+            addAnalysisEntry(analysis, type);
+            
+            // Check for important events
+            const lowerAnalysis = analysis.toLowerCase();
+            
+            // Task completion detection
+            if (lowerAnalysis.includes('ball') && lowerAnalysis.includes('cup')) {
+                showAnnouncement('🎯 Goal! Robot scored by dropping ball in cup!', 'success');
+                playSound('success');
+            }
+            // Robot issues
+            else if (lowerAnalysis.includes('tipped') || lowerAnalysis.includes('fallen')) {
+                showAnnouncement('⚠️ Robot tipped over!', 'alert');
+                playSound('alert');
+            }
+            else if (lowerAnalysis.includes('collision') || lowerAnalysis.includes('crashed')) {
+                showAnnouncement('💥 Collision detected!', 'alert');
+                playSound('alert');
+            }
+            // Positive events
+            else if (lowerAnalysis.includes('picked up') || lowerAnalysis.includes('grabbed')) {
+                showAnnouncement('🤖 Robot picked up an object!', 'success');
+            }
+        }
+        
+        // Add analysis entry to panel
+        function addAnalysisEntry(text, type) {
+            const entry = document.createElement('div');
+            entry.className = 'analysis-entry';
+            
+            if (type === 'motion') entry.classList.add('alert');
+            if (text.toLowerCase().includes('success') || text.toLowerCase().includes('completed')) {
+                entry.classList.add('success');
+            }
+            
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `
+                <div class="analysis-time">${time} - ${type}</div>
+                <div class="analysis-text">${text}</div>
+            `;
+            
+            analysisResults.insertBefore(entry, analysisResults.firstChild);
+            
+            // Limit entries
+            while (analysisResults.children.length > MAX_ANALYSIS_ENTRIES) {
+                analysisResults.removeChild(analysisResults.lastChild);
+            }
+        }
+        
+        // Show announcement
+        function showAnnouncement(text, type) {
+            announcementText.textContent = text;
+            announcement.className = `announcement show ${type}`;
+            
+            setTimeout(() => {
+                announcement.classList.remove('show');
+            }, 5000);
+        }
+        
+        // Play sound
+        function playSound(type) {
+            if (!document.getElementById('soundEnabled').checked) return;
+            
+            // Use Web Audio API for simple beeps
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            if (type === 'success') {
+                oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                oscillator.frequency.setValueAtTime(1000, audioContext.currentTime + 0.1);
+            } else {
+                oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+                oscillator.frequency.setValueAtTime(300, audioContext.currentTime + 0.1);
+            }
+            
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.3);
+        }
+        
+        // Control functions
+        function analyzeNow() {
+            analyzeFrame('general');
+        }
+        
+        function togglePause() {
+            isPaused = !isPaused;
+            document.getElementById('pauseBtn').textContent = isPaused ? 'Resume Analysis' : 'Pause Analysis';
+        }
+        
+        // Initial analysis after 3 seconds
+        setTimeout(() => {
+            if (!isPaused) {
+                analyzeFrame('general');
+            }
+        }, 3000);
+    </script>
+</body>
+</html>

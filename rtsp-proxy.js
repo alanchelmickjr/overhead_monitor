@@ -32,8 +32,7 @@ const RTSP_URLS = [
   `rtsp://${CAMERA_IP}:554/1`,
   `rtsp://${CAMERA_IP}:554/live`,
   `rtsp://${CAMERA_IP}:554/ch0_0.h264`,
-  `rtsp://${CAMERA_IP}:554/`,
-  `rtsp://admin:admin@${CAMERA_IP}:554/stream1`, // with default credentials
+  `rtsp://${CAMERA_IP}:554/`
 ];
 
 let currentStream = null;

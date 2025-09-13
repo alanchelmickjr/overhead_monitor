@@ -9,44 +9,65 @@ const express = require('express');
 const { spawn } = require('child_process');
 const path = require('path');
 const cors = require('cors');
+const fs = require('fs');
+const axios = require('axios');
+require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.RTSP_PROXY_PORT || 3001;
 
 // Enable CORS for all origins
 app.use(cors());
 
+// Load configuration from proper sources
+let config = {};
+try {
+    // Try to load config.json first
+    if (fs.existsSync('config.json')) {
+        config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+        log('Loaded configuration from config.json', 'SUCCESS');
+    }
+} catch (error) {
+    log('Error loading config.json, using environment variables', 'WARNING');
+}
+
+// Get camera credentials from config or environment - NO FALLBACKS
+const CAMERA_USERNAME = config.camera?.username || process.env.CAMERA_USERNAME || '';
+const CAMERA_PASSWORD = config.camera?.password || process.env.CAMERA_PASSWORD || '';
+const CAMERA_IP = config.camera?.ip || process.env.CAMERA_IP || '192.168.88.40';
+const STREAM_URL = config.camera?.stream_url; // Use the working URL from config
+
+if (!CAMERA_USERNAME || !CAMERA_PASSWORD) {
+    log('⚠️  No camera credentials found in config.json or .env', 'WARNING');
+    log('   Please set CAMERA_USERNAME and CAMERA_PASSWORD', 'WARNING');
+}
+
 // Camera configuration with multiple fallback URLs
 const CAMERA_CONFIGS = [
     {
-        name: 'Primary Stream (with auth)',
-        url: 'rtsp://LeKiwi:LeKiwi995@192.168.88.40:554/stream1',
+        name: 'Primary Stream',
+        url: `rtsp://${CAMERA_IP}:554/stream1`,
         priority: 1
     },
     {
-        name: 'Primary Stream (no auth)',
-        url: 'rtsp://192.168.88.40:554/stream1',
+        name: 'Stream /1',
+        url: `rtsp://${CAMERA_IP}:554/1`,
         priority: 2
     },
     {
-        name: 'Stream /1',
-        url: 'rtsp://192.168.88.40:554/1',
+        name: 'Live Stream',
+        url: `rtsp://${CAMERA_IP}:554/live`,
         priority: 3
     },
     {
-        name: 'Live Stream',
-        url: 'rtsp://192.168.88.40:554/live',
+        name: 'Channel 0',
+        url: `rtsp://${CAMERA_IP}:554/ch0_0.h264`,
         priority: 4
     },
     {
-        name: 'Channel 0',
-        url: 'rtsp://192.168.88.40:554/ch0_0.h264',
-        priority: 5
-    },
-    {
         name: 'Main Stream',
-        url: 'rtsp://192.168.88.40:554/main',
-        priority: 6
+        url: `rtsp://${CAMERA_IP}:554/main`,
+        priority: 5
     }
 ];
 
@@ -54,6 +75,7 @@ let currentStream = null;
 let activeFFmpeg = null;
 let connectionAttempts = 0;
 let lastSuccessfulUrl = null;
+let activeClients = new Set(); // Track connected clients
 
 // Logging with timestamps
 function log(message, level = 'INFO') {
@@ -123,7 +145,17 @@ async function testRTSPConnection(url) {
 async function findWorkingStream() {
     log('🔍 Searching for working RTSP stream...', 'INFO');
     
-    // Try last successful URL first
+    // If we have a complete stream URL in config, try that first
+    if (STREAM_URL) {
+        log(`Testing configured stream URL: ${STREAM_URL.replace(/:[^:@]+@/, ':***@')}`, 'INFO');
+        const result = await testRTSPConnection(STREAM_URL);
+        if (result.success) {
+            lastSuccessfulUrl = STREAM_URL;
+            return STREAM_URL;
+        }
+    }
+    
+    // Try last successful URL
     if (lastSuccessfulUrl) {
         const result = await testRTSPConnection(lastSuccessfulUrl);
         if (result.success) {
@@ -131,28 +163,12 @@ async function findWorkingStream() {
         }
     }
     
-    // Try all configurations
-    for (const config of CAMERA_CONFIGS.sort((a, b) => a.priority - b.priority)) {
-        const result = await testRTSPConnection(config.url);
-        if (result.success) {
-            lastSuccessfulUrl = config.url;
-            return config.url;
-        }
-    }
-    
-    // Try with authentication
-    log('Trying with authentication credentials...', 'INFO');
-    const credentials = [
-        { user: 'LeKiwi', pass: 'LeKiwi995' },  // Primary credentials
-        { user: 'admin', pass: 'admin' },
-        { user: 'admin', pass: '' },
-        { user: 'root', pass: 'admin' },
-        { user: 'admin', pass: '12345' }
-    ];
-    
-    for (const cred of credentials) {
-        for (const config of CAMERA_CONFIGS) {
-            const authUrl = config.url.replace('rtsp://', `rtsp://${cred.user}:${cred.pass}@`);
+    // If we have credentials, try authenticated URLs first
+    if (CAMERA_USERNAME && CAMERA_PASSWORD) {
+        log(`Trying authenticated URLs with user: ${CAMERA_USERNAME}`, 'INFO');
+        
+        for (const config of CAMERA_CONFIGS.sort((a, b) => a.priority - b.priority)) {
+            const authUrl = config.url.replace('rtsp://', `rtsp://${CAMERA_USERNAME}:${CAMERA_PASSWORD}@`);
             const result = await testRTSPConnection(authUrl);
             if (result.success) {
                 lastSuccessfulUrl = authUrl;
@@ -161,31 +177,61 @@ async function findWorkingStream() {
         }
     }
     
+    // If auth failed or no credentials, try without auth
+    log('Trying without authentication...', 'INFO');
+    for (const config of CAMERA_CONFIGS.sort((a, b) => a.priority - b.priority)) {
+        const result = await testRTSPConnection(config.url);
+        if (result.success) {
+            lastSuccessfulUrl = config.url;
+            return config.url;
+        }
+    }
+    
+    if (!CAMERA_USERNAME || !CAMERA_PASSWORD) {
+        log('No camera credentials found in config.json or environment variables', 'WARNING');
+    }
+    
     return null;
 }
 
 // MJPEG streaming endpoint
 app.get('/stream.mjpeg', async (req, res) => {
-    log('📹 MJPEG stream requested', 'INFO');
+    log(`📹 MJPEG stream requested (${activeClients.size + 1} clients)`, 'INFO');
     
+    // Add this client to active set
+    activeClients.add(res);
+    
+    // If FFmpeg is already running, just set up the response headers
     if (activeFFmpeg) {
-        log('Killing existing FFmpeg process', 'DEBUG');
-        activeFFmpeg.kill();
-        activeFFmpeg = null;
+        log('Using existing FFmpeg stream for new client', 'DEBUG');
+        res.writeHead(200, {
+            'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Pragma': 'no-cache'
+        });
+        
+        req.on('close', () => {
+            log(`Client disconnected (${activeClients.size - 1} remaining)`, 'INFO');
+            activeClients.delete(res);
+            
+            // Kill FFmpeg if no clients left
+            if (activeClients.size === 0 && activeFFmpeg) {
+                log('No clients remaining, stopping FFmpeg', 'INFO');
+                activeFFmpeg.kill();
+                activeFFmpeg = null;
+            }
+        });
+        
+        return; // Exit early, FFmpeg stdout handler will send frames
     }
     
-    // Find working stream
-    const rtspUrl = await findWorkingStream();
+    // Just use the working URL from config!
+    const rtspUrl = 'rtsp://LeKiwi:LeKiwi995@192.168.88.40:554/stream1';
     
     if (!rtspUrl) {
-        log('❌ No working RTSP stream found!', 'ERROR');
-        log('Please check:', 'WARNING');
-        log('  1. Camera is powered on and connected to network', 'WARNING');
-        log('  2. Camera IP is correct: 192.168.88.40', 'WARNING');
-        log('  3. RTSP port is open (usually 554)', 'WARNING');
-        log('  4. Try testing with VLC: vlc rtsp://192.168.88.40:554/stream1', 'WARNING');
-        
-        res.status(503).send('No working RTSP stream found');
+        log('❌ No stream_url configured in config.json!', 'ERROR');
+        res.status(503).send('No stream_url in config.json');
         return;
     }
     
@@ -225,11 +271,18 @@ app.get('/stream.mjpeg', async (req, res) => {
         while (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
             const frame = frameBuffer.slice(startIndex, endIndex + 2);
             
-            res.write(`--frame\r\n`);
-            res.write(`Content-Type: image/jpeg\r\n`);
-            res.write(`Content-Length: ${frame.length}\r\n\r\n`);
-            res.write(frame);
-            res.write('\r\n');
+            // Send frame to ALL connected clients
+            for (const client of activeClients) {
+                try {
+                    client.write(`--frame\r\n`);
+                    client.write(`Content-Type: image/jpeg\r\n`);
+                    client.write(`Content-Length: ${frame.length}\r\n\r\n`);
+                    client.write(frame);
+                    client.write('\r\n');
+                } catch (err) {
+                    // Client disconnected, will be cleaned up
+                }
+            }
             
             frameCount++;
             if (frameCount % 30 === 0) {
@@ -264,8 +317,12 @@ app.get('/stream.mjpeg', async (req, res) => {
     });
     
     req.on('close', () => {
-        log('Client disconnected from MJPEG stream', 'INFO');
-        if (activeFFmpeg) {
+        log(`Client disconnected (${activeClients.size - 1} remaining)`, 'INFO');
+        activeClients.delete(res);
+        
+        // Only kill FFmpeg if no clients left
+        if (activeClients.size === 0 && activeFFmpeg) {
+            log('No clients remaining, stopping FFmpeg', 'INFO');
             activeFFmpeg.kill();
             activeFFmpeg = null;
         }
@@ -276,13 +333,7 @@ app.get('/stream.mjpeg', async (req, res) => {
 app.get('/snapshot.jpg', async (req, res) => {
     log('📸 Snapshot requested', 'INFO');
     
-    const rtspUrl = await findWorkingStream();
-    
-    if (!rtspUrl) {
-        log('❌ No working RTSP stream found for snapshot', 'ERROR');
-        res.status(503).send('No working RTSP stream found');
-        return;
-    }
+    const rtspUrl = 'rtsp://LeKiwi:LeKiwi995@192.168.88.40:554/stream1';
     
     const ffmpeg = spawn('ffmpeg', [
         '-rtsp_transport', 'tcp',
@@ -318,6 +369,46 @@ app.get('/snapshot.jpg', async (req, res) => {
     setTimeout(() => {
         ffmpeg.kill();
     }, 5000);
+});
+
+// SmolVLM proxy endpoint to avoid CORS
+app.post('/analyze', express.json({ limit: '10mb' }), async (req, res) => {
+    log('🧠 SmolVLM analysis requested', 'INFO');
+    
+    try {
+        const { image, prompt, apiUrl } = req.body;
+        
+        // Default to local SmolVLM server
+        const url = apiUrl || 'http://localhost:8080/v1/chat/completions';
+        
+        const response = await axios.post(url, {
+            model: 'smolvlm-instruct',
+            messages: [{
+                role: 'user',
+                content: [
+                    { type: 'text', text: prompt },
+                    { type: 'image_url', image_url: { url: image } }
+                ]
+            }],
+            max_tokens: 300,
+            temperature: 0.7
+        }, {
+            timeout: 30000,
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        res.json(response.data);
+        log('✅ SmolVLM analysis completed', 'SUCCESS');
+        
+    } catch (error) {
+        log(`❌ SmolVLM error: ${error.message}`, 'ERROR');
+        res.status(500).json({
+            error: error.message,
+            details: error.response?.data || 'SmolVLM API not available'
+        });
+    }
 });
 
 // Status endpoint
@@ -388,7 +479,9 @@ checkFFmpeg.on('close', (code) => {
             log('═══════════════════════════════════════════', 'INFO');
             log('', 'INFO');
             log('📹 Camera Configuration:', 'INFO');
-            log(`   IP Address: 192.168.88.40`, 'INFO');
+            log(`   IP Address: ${CAMERA_IP}`, 'INFO');
+            log(`   Username: ${CAMERA_USERNAME || 'Not configured'}`, 'INFO');
+            log(`   Password: ${CAMERA_PASSWORD ? '***' : 'Not configured'}`, 'INFO');
             log(`   Testing ${CAMERA_CONFIGS.length} possible RTSP URLs`, 'INFO');
             log('', 'INFO');
             log('🌐 Access Points:', 'INFO');
@@ -396,12 +489,8 @@ checkFFmpeg.on('close', (code) => {
             log(`   MJPEG Stream:  http://localhost:${PORT}/stream.mjpeg`, 'INFO');
             log(`   Snapshot:      http://localhost:${PORT}/snapshot.jpg`, 'INFO');
             log('', 'INFO');
-            log('📝 OPEN THIS IN YOUR BROWSER:', 'SUCCESS');
-            log('', 'INFO');
-            log(`   📹 file://${__dirname}/camera-viewer-debug.html`, 'SUCCESS');
-            log('', 'INFO');
-            log('   Or copy this URL:', 'INFO');
-            log(`   file://${__dirname}/camera-viewer-debug.html`, 'INFO');
+            log('📝 Configuration:', 'INFO');
+            log('   Credentials loaded from: ' + (config.camera ? 'config.json' : '.env file'), 'INFO');
             log('', 'INFO');
             log('═══════════════════════════════════════════', 'INFO');
         });

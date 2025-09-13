@@ -1,3 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Overhead Monitor - Camera Viewer (Debug)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #1a1a1a;
@@ -407,7 +420,7 @@
                     <button onclick="setURL('http://192.168.88.40/snapshot.jpg')" style="font-size: 12px;">HTTP: /snapshot.jpg</button>
                     <button onclick="setURL('http://192.168.88.40/image.jpg')" style="font-size: 12px;">HTTP: /image.jpg</button>
                     <button onclick="setURL('http://192.168.88.40/mjpg/video.mjpg')" style="font-size: 12px;">MJPEG: /mjpg/video.mjpg</button>
-                    <button onclick="setURL('http://localhost:3001/stream.mjpeg')" style="font-size: 12px;">Proxy: localhost:3001</button>
+                    <button onclick="setURL('http://localhost:3001/stream.mjpeg')" style="font-size: 12px;">Proxy Stream: localhost:3001</button>
                 </div>
                 
                 <h3 style="margin-top: 20px; margin-bottom: 10px;">Connection Help</h3>
@@ -419,11 +432,11 @@
                         <li>Common ports: 554, 8554, 10554</li>
                     </ul>
                     
-                    <p style="margin-top: 10px;"><strong>Using Proxy Server:</strong></p>
+                    <p style="margin-top: 10px;"><strong>Quick Connect:</strong></p>
                     <ol style="margin-left: 20px; margin-top: 5px;">
-                        <li>Run: <code>node rtsp-proxy.js</code></li>
                         <li>Select "Via Proxy Server" protocol</li>
-                        <li>URL will auto-update to proxy endpoint</li>
+                        <li>Click "Connect Camera"</li>
+                        <li>Stream will start automatically</li>
                     </ol>
                     
                     <p style="margin-top: 10px;"><strong>Test with VLC:</strong></p>
@@ -612,15 +625,24 @@
         // Connect to camera
         async function connectCamera() {
             const protocol = document.getElementById('cameraProtocol').value;
-            const url = document.getElementById('cameraURL').value;
+            let url = document.getElementById('cameraURL').value;
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
+            
+            // Force correct URL for proxy protocol
+            if (protocol === 'proxy') {
+                url = 'http://localhost:3001/stream.mjpeg';
+                document.getElementById('cameraURL').value = url;
+                log(`Using proxy server at ${url}`, 'info');
+            }
             
             log(`Attempting to connect: ${url}`, 'info');
             
             if (protocol === 'rtsp') {
-                log('RTSP requires proxy server. Starting proxy connection...', 'warning');
-                alert('RTSP streams require the proxy server.\n\n1. Run: node rtsp-proxy.js\n2. Switch to "Via Proxy Server" protocol');
+                log('RTSP requires proxy server. Switching to proxy protocol...', 'warning');
+                document.getElementById('cameraProtocol').value = 'proxy';
+                updateCameraURL();
+                connectCamera(); // Retry with proxy
                 return;
             }
             
@@ -684,28 +706,45 @@
             const img = document.getElementById('videoDisplay');
             const noFeed = document.getElementById('noFeed');
             
+            log(`Connecting to MJPEG stream: ${url}`, 'info');
+            
+            // Clear any existing source first
+            img.src = '';
+            
             img.style.display = 'block';
             noFeed.style.display = 'none';
             
-            // Add auth if provided
-            if (username && password) {
+            // Don't add auth for proxy URLs
+            if (!url.includes('localhost') && username && password) {
                 const urlParts = url.split('://');
                 url = urlParts[0] + '://' + username + ':' + password + '@' + urlParts[1];
             }
             
+            let errorCount = 0;
+            
             img.onerror = () => {
-                log('MJPEG stream connection failed', 'error');
-                disconnectCamera();
+                errorCount++;
+                log(`MJPEG stream error (attempt ${errorCount})`, 'error');
+                if (errorCount > 3) {
+                    log('MJPEG stream connection failed after 3 attempts', 'error');
+                    disconnectCamera();
+                }
             };
             
             img.onload = () => {
-                isConnected = true;
-                updateStatus('Connected', true);
-                enableControls(true);
-                log('MJPEG stream connected successfully', 'success');
+                if (!isConnected) {
+                    isConnected = true;
+                    updateStatus('Connected', true);
+                    enableControls(true);
+                    log('MJPEG stream connected successfully!', 'success');
+                    document.getElementById('protocolStatus').textContent = 'MJPEG';
+                }
+                errorCount = 0; // Reset error count on success
             };
             
+            // Set the source
             img.src = url;
+            log(`Image source set to: ${url}`, 'debug');
         }
         
         // Disconnect camera
@@ -797,8 +836,8 @@
         log('Credentials loaded: LeKiwi', 'info');
         log('Click "Test All URLs" to scan for available endpoints', 'info');
         
-        // Don't auto-expand diagnostics on load - user can click to expand
-        // toggleDiagnostics();
+        // Start with diagnostics collapsed
+        // toggleDiagnostics();  // Comment out to start collapsed
     </script>
 </body>
 </html>
