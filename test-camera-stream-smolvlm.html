@@ -173,13 +173,55 @@
         
         .analysis-log {
             margin-top: 20px;
-            max-height: 300px;
+            max-height: 200px;
             overflow-y: auto;
             background: #0a0a0a;
             padding: 15px;
             border-radius: 4px;
             font-family: monospace;
             font-size: 12px;
+        }
+        
+        .detection-panel {
+            margin-top: 20px;
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #ff4444;
+        }
+        
+        .detection-panel h2 {
+            margin-top: 0;
+            font-size: 20px;
+            color: #ff4444;
+        }
+        
+        .detection-list {
+            max-height: 250px;
+            overflow-y: auto;
+            background: #0a0a0a;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .detection-entry {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #441111;
+            border-left: 4px solid #ff4444;
+            border-radius: 4px;
+        }
+        
+        .detection-time {
+            color: #ffaa00;
+            font-weight: bold;
+        }
+        
+        .detection-condition {
+            margin-top: 5px;
+            color: #fff;
         }
         
         .log-entry {
@@ -310,6 +352,14 @@
                 
                 <h2 style="margin-top: 30px;">Analysis Log</h2>
                 <div class="analysis-log" id="analysisLog"></div>
+                
+                <!-- Detection Panel -->
+                <div class="detection-panel">
+                    <h2>🚨 Detected Events</h2>
+                    <div class="detection-list" id="detectionList">
+                        <div style="color: #666; text-align: center;">No detections yet...</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -442,26 +492,40 @@
         async function callSmolVLM(imageData, prompt) {
             const apiUrl = document.getElementById('smolvlmUrl').value;
             
-            // Use proxy endpoint to avoid CORS issues
-            const response = await fetch('http://localhost:3001/analyze', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    image: imageData,
-                    prompt: prompt,
-                    apiUrl: apiUrl
-                })
-            });
-            
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.details || error.error || `API error: ${response.status}`);
+            try {
+                // Use proxy endpoint to avoid CORS issues
+                const response = await fetch('http://localhost:3001/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: imageData,
+                        prompt: prompt,
+                        apiUrl: apiUrl
+                    })
+                });
+                
+                if (!response.ok) {
+                    let errorMsg = `API error: ${response.status}`;
+                    try {
+                        const error = await response.json();
+                        errorMsg = error.details || error.error || errorMsg;
+                    } catch (e) {
+                        // If response isn't JSON, just use status
+                    }
+                    throw new Error(errorMsg);
+                }
+                
+                const data = await response.json();
+                if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+                    throw new Error('Invalid response format from SmolVLM');
+                }
+                return data.choices[0].message.content;
+            } catch (error) {
+                // Re-throw with more context
+                throw new Error(`SmolVLM API Error: ${error.message}`);
             }
-            
-            const data = await response.json();
-            return data.choices[0].message.content;
         }
         
         // Process analysis result
@@ -485,6 +549,9 @@
                 addLogEntry(summary.join('\n'), 'alert');
                 updateConnectionStatus('Alert detected!', 'warning');
                 
+                // Add to detection panel
+                addDetection(summary);
+                
                 // Save alert to localStorage for redundancy
                 saveAlert({
                     timestamp: new Date().toISOString(),
@@ -494,6 +561,38 @@
             } else {
                 addLogEntry(`Frame ${stats.frames}: All conditions normal`, 'success');
                 updateConnectionStatus('All systems normal', 'success');
+            }
+        }
+        
+        // Add detection to dedicated panel
+        function addDetection(conditions) {
+            const detectionList = document.getElementById('detectionList');
+            
+            // Clear placeholder if this is first detection
+            if (detectionList.querySelector('div[style*="color: #666"]')) {
+                detectionList.innerHTML = '';
+            }
+            
+            const entry = document.createElement('div');
+            entry.className = 'detection-entry';
+            
+            const time = document.createElement('div');
+            time.className = 'detection-time';
+            time.textContent = new Date().toLocaleTimeString();
+            entry.appendChild(time);
+            
+            conditions.forEach(condition => {
+                const condDiv = document.createElement('div');
+                condDiv.className = 'detection-condition';
+                condDiv.textContent = condition;
+                entry.appendChild(condDiv);
+            });
+            
+            detectionList.insertBefore(entry, detectionList.firstChild);
+            
+            // Keep only last 50 detections
+            while (detectionList.children.length > 50) {
+                detectionList.removeChild(detectionList.lastChild);
             }
         }
         

@@ -10,7 +10,7 @@ lsof -ti:3001 | xargs kill -9 2>/dev/null
 
 # Start RTSP proxy in background
 echo "Starting RTSP Proxy on port 3001..."
-node rtsp-proxy-debug.js &
+node rtsp-proxy.js &
 PROXY_PID=$!
 
 # Wait a moment for proxy to start
