@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # Main application
+  app:
+    build: .
+    container_name: robot-monitor
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=robot_monitor
+      - DB_USER=robot_monitor
+      - DB_PASSWORD=robot_monitor_password
+      - SMOLVLM_API_URL=http://smolvlm:8080
+      - JWT_SECRET=change_this_secret_key
+      - REDIS_HOST=redis
+    volumes:
+      - ./config.json:/app/config.json
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - robot-monitor-network
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:14-alpine
+    container_name: robot-monitor-db
+    environment:
+      - POSTGRES_DB=robot_monitor
+      - POSTGRES_USER=robot_monitor
+      - POSTGRES_PASSWORD=robot_monitor_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - robot-monitor-network
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: robot-monitor-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - robot-monitor-network
+
+  # SmolVLM API (example, replace with your actual SmolVLM setup)
+  smolvlm:
+    image: huggingface/smolvlm:latest
+    container_name: robot-monitor-smolvlm
+    ports:
+      - "8080:8080"
+    environment:
+      - MODEL_NAME=smolvlm-instruct
+      - MAX_TOKENS=150
+    volumes:
+      - ./models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - robot-monitor-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  robot-monitor-network:
+    driver: bridge

@@ -1,0 +1,251 @@
+{
+  "server": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "cors_origin": "*"
+  },
+  "cameras": [
+    {
+      "id": "cam-001",
+      "name": "Overhead Main",
+      "protocol": "rtsp",
+      "url": "rtsp://192.168.1.100:554/stream1",
+      "username": "admin",
+      "password": "your_camera_password",
+      "resolution": {
+        "width": 1920,
+        "height": 1080
+      },
+      "fps": 30
+    },
+    {
+      "id": "cam-002",
+      "name": "Overhead Secondary",
+      "protocol": "http",
+      "url": "http://192.168.1.101/snapshot",
+      "username": "admin",
+      "password": "your_camera_password",
+      "resolution": {
+        "width": 1280,
+        "height": 720
+      },
+      "fps": 15
+    }
+  ],
+  "api": {
+    "base_url": "http://localhost:8080",
+    "api_path": "/v1/chat/completions",
+    "model": "smolvlm-instruct",
+    "max_tokens": 150,
+    "temperature": 0.7,
+    "timeout": 30000,
+    "max_retries": 3,
+    "cache_timeout": 5000
+  },
+  "detection": {
+    "confidence_thresholds": {
+      "robot_tipped": 0.85,
+      "robot_stuck": 0.75,
+      "collision_detected": 0.80,
+      "task_completed": 0.70,
+      "zone_violation": 0.75,
+      "performance_anomaly": 0.65,
+      "safety_concern": 0.90
+    },
+    "confirmation_frames": {
+      "robot_tipped": 3,
+      "robot_stuck": 5,
+      "collision_detected": 2,
+      "task_completed": 1,
+      "zone_violation": 2,
+      "performance_anomaly": 4,
+      "safety_concern": 1
+    },
+    "zones": [
+      {
+        "id": "zone-1",
+        "name": "Work Area A",
+        "type": "rectangle",
+        "coordinates": {
+          "x": 100,
+          "y": 100,
+          "width": 800,
+          "height": 600
+        },
+        "color": "#00ff00",
+        "priority": "medium"
+      },
+      {
+        "id": "zone-2",
+        "name": "Charging Station",
+        "type": "circle",
+        "coordinates": {
+          "cx": 1500,
+          "cy": 800,
+          "radius": 150
+        },
+        "color": "#0080ff",
+        "priority": "low"
+      },
+      {
+        "id": "zone-3",
+        "name": "Danger Zone",
+        "type": "polygon",
+        "coordinates": [
+          {"x": 400, "y": 500},
+          {"x": 600, "y": 500},
+          {"x": 700, "y": 700},
+          {"x": 300, "y": 700}
+        ],
+        "color": "#ff0000",
+        "priority": "high"
+      }
+    ]
+  },
+  "alerts": {
+    "rules": [
+      {
+        "id": "rule-001",
+        "name": "Robot Tipped Critical Alert",
+        "event_type": "robot_tipped",
+        "min_confidence": 0.8,
+        "channels": ["dashboard", "email", "sms"],
+        "recipients": ["operator@example.com", "+1234567890"],
+        "title": "CRITICAL: Robot {robot} Tipped Over",
+        "message": "Robot {robot} has tipped over in {zone}. Immediate attention required.",
+        "cooldown": 60,
+        "enabled": true,
+        "actions": [
+          {
+            "type": "capture_screenshot"
+          },
+          {
+            "type": "sound_alarm"
+          }
+        ]
+      },
+      {
+        "id": "rule-002",
+        "name": "Collision Detection Alert",
+        "event_type": "collision_detected",
+        "min_confidence": 0.75,
+        "channels": ["dashboard", "email"],
+        "recipients": ["operator@example.com"],
+        "title": "Collision Detected",
+        "message": "Potential collision detected at {timestamp}",
+        "cooldown": 30,
+        "enabled": true
+      },
+      {
+        "id": "rule-003",
+        "name": "Robot Stuck Warning",
+        "event_type": "robot_stuck",
+        "min_confidence": 0.7,
+        "channels": ["dashboard"],
+        "title": "Robot Stuck",
+        "message": "Robot {robot} appears to be stuck",
+        "cooldown": 120,
+        "enabled": true
+      },
+      {
+        "id": "rule-004",
+        "name": "Zone Violation Alert",
+        "event_type": "zone_violation",
+        "zones": ["zone-3"],
+        "channels": ["dashboard", "email"],
+        "recipients": ["supervisor@example.com"],
+        "title": "Zone Violation",
+        "message": "Unauthorized entry into {zone}",
+        "cooldown": 60,
+        "enabled": true
+      }
+    ],
+    "channels": {
+      "email": {
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "smtp_secure": false,
+        "smtp_user": "robot.monitor@example.com",
+        "smtp_pass": "your_email_password",
+        "from": "robot.monitor@example.com"
+      },
+      "sms": {
+        "api_url": "https://api.twilio.com/2010-04-01/Accounts/YOUR_ACCOUNT_SID/Messages.json",
+        "api_key": "your_twilio_auth_token",
+        "from_number": "+1234567890"
+      },
+      "webhook": {
+        "urls": [
+          "https://your-webhook-endpoint.com/alerts"
+        ],
+        "secret": "your_webhook_secret"
+      }
+    },
+    "default_channels": ["dashboard", "log"],
+    "throttle": {
+      "window": 60000,
+      "maxAlerts": 5
+    },
+    "escalation_policies": [
+      {
+        "priority": "critical",
+        "steps": [
+          {
+            "delay": 120,
+            "channels": ["email"],
+            "additional_recipients": ["supervisor@example.com"]
+          },
+          {
+            "delay": 300,
+            "channels": ["sms", "email"],
+            "additional_recipients": ["manager@example.com", "+9876543210"]
+          }
+        ]
+      }
+    ]
+  },
+  "monitoring": {
+    "captureInterval": 500,
+    "frameQuality": 0.8,
+    "maxFrameWidth": 1920,
+    "maxFrameHeight": 1080
+  },
+  "database": {
+    "type": "postgresql",
+    "host": "localhost",
+    "port": 5432,
+    "database": "robot_monitor",
+    "username": "robot_monitor",
+    "password": "your_db_password",
+    "ssl": false
+  },
+  "storage": {
+    "screenshots": {
+      "enabled": true,
+      "path": "./data/screenshots",
+      "retention_days": 30
+    },
+    "events": {
+      "retention_days": 90,
+      "max_events": 100000
+    },
+    "logs": {
+      "path": "./logs",
+      "level": "info",
+      "retention_days": 7
+    }
+  },
+  "performance": {
+    "cache": {
+      "enabled": true,
+      "ttl": 5000,
+      "max_size": 100
+    },
+    "optimization": {
+      "adaptive_sampling": true,
+      "roi_processing": false,
+      "batch_processing": true,
+      "max_concurrent_requests": 3
+    }
+  }
+}
