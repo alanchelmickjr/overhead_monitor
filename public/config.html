@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Overhead Monitor - Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1><i class="fas fa-robot"></i> Robot Overhead Monitor</h1>
+                <div class="connection-status">
+                    <span class="status-indicator" id="connectionStatus"></span>
+                    <span id="connectionText">Connecting...</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-danger" id="emergencyStop">
+                    <i class="fas fa-stop-circle"></i> Emergency Stop
+                </button>
+                <button class="btn btn-secondary" id="settingsBtn">
+                    <i class="fas fa-cog"></i> Configure Feed
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h3>Cameras</h3>
+                    <div id="cameraList" class="camera-list">
+                        <!-- Camera items will be added dynamically -->
+                    </div>
+                </div>
+                
+                <div class="sidebar-section">
+                    <h3>System Status</h3>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="status-label">Vision API</span>
+                            <span class="status-value" id="visionStatus">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Database</span>
+                            <span class="status-value" id="dbStatus">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Alerts</span>
+                            <span class="status-value" id="alertStatus">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3>Statistics</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-value" id="eventCount">0</span>
+                            <span class="stat-label">Events Today</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="alertCount">0</span>
+                            <span class="stat-label">Active Alerts</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="robotCount">0</span>
+                            <span class="stat-label">Robots Active</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Central Panel -->
+            <main class="central-panel">
+                <!-- Video Feed -->
+                <div class="video-container">
+                    <div class="video-header">
+                        <h2 id="cameraTitle">Select a Camera</h2>
+                        <div class="video-controls">
+                            <button class="btn btn-sm" id="startMonitor">
+                                <i class="fas fa-play"></i> Start
+                            </button>
+                            <button class="btn btn-sm" id="stopMonitor">
+                                <i class="fas fa-stop"></i> Stop
+                            </button>
+                            <button class="btn btn-sm" id="captureSnapshot">
+                                <i class="fas fa-camera"></i> Snapshot
+                            </button>
+                            <select id="intervalSelect" class="select-sm">
+                                <option value="100">100ms</option>
+                                <option value="250">250ms</option>
+                                <option value="500" selected>500ms</option>
+                                <option value="1000">1s</option>
+                                <option value="2000">2s</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="video-wrapper">
+                        <img id="stream" src="http://localhost:3001/stream.mjpeg" alt="Camera Stream" style="width: 100%; height: auto; display: block;">
+                        <canvas id="captureCanvas" style="display: none;"></canvas>
+                        <div class="video-overlay" id="videoOverlay">
+                            <!-- Zone overlays will be drawn here -->
+                        </div>
+                        <div class="no-feed" id="noFeed" style="display: none;">
+                            <i class="fas fa-video-slash"></i>
+                            <p>No video feed available</p>
+                        </div>
+                    </div>
+                    <div class="video-info">
+                        <span>FPS: <span id="fps">--</span></span>
+                        <span>Resolution: <span id="resolution">--</span></span>
+                        <span>Latency: <span id="latency">--</span>ms</span>
+                    </div>
+                </div>
+
+                <!-- Analysis Panel -->
+                <div class="analysis-panel">
+                    <div class="analysis-header">
+                        <h3>Real-time Analysis</h3>
+                        <button class="btn btn-sm" id="customAnalysis">
+                            <i class="fas fa-brain"></i> Custom Prompt
+                        </button>
+                    </div>
+                    <div class="analysis-content" id="analysisContent">
+                        <p class="analysis-placeholder">Analysis results will appear here...</p>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Right Panel -->
+            <aside class="right-panel">
+                <!-- Alerts Section -->
+                <div class="panel-section">
+                    <div class="section-header">
+                        <h3>Alerts</h3>
+                        <span class="badge" id="alertBadge">0</span>
+                    </div>
+                    <div class="alert-list" id="alertList">
+                        <!-- Alerts will be added dynamically -->
+                    </div>
+                </div>
+
+                <!-- Events Section -->
+                <div class="panel-section">
+                    <div class="section-header">
+                        <h3>Recent Events</h3>
+                        <button class="btn btn-sm" id="clearEvents">Clear</button>
+                    </div>
+                    <div class="event-list" id="eventList">
+                        <!-- Events will be added dynamically -->
+                    </div>
+                </div>
+
+                <!-- Robot Status -->
+                <div class="panel-section">
+                    <div class="section-header">
+                        <h3>Robot Status</h3>
+                    </div>
+                    <div class="robot-list" id="robotList">
+                        <!-- Robot status items will be added dynamically -->
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-left">
+                <span>© 2024 Robot Overhead Monitor</span>
+            </div>
+            <div class="footer-center">
+                <span id="systemTime"></span>
+            </div>
+            <div class="footer-right">
+                <span>v1.0.0</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modals -->
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>Detection Thresholds</h3>
+                    <div class="setting-item">
+                        <label>Robot Tipped Confidence</label>
+                        <input type="range" id="tippedThreshold" min="0" max="100" value="85">
+                        <span id="tippedThresholdValue">85%</span>
+                    </div>
+                    <div class="setting-item">
+                        <label>Collision Detection Confidence</label>
+                        <input type="range" id="collisionThreshold" min="0" max="100" value="80">
+                        <span id="collisionThresholdValue">80%</span>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h3>Alert Channels</h3>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="emailAlerts" checked> Email Notifications
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="smsAlerts"> SMS Notifications
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="soundAlerts" checked> Sound Alerts
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h3>Display Options</h3>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="showZones" checked> Show Zone Overlays
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="showRobotIds" checked> Show Robot IDs
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" id="darkMode"> Dark Mode
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="saveSettings">Save Settings</button>
+                <button class="btn btn-secondary modal-close">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Analysis Modal -->
+    <div id="analysisModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Custom Analysis</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label for="customPrompt">Enter your analysis prompt:</label>
+                <textarea id="customPrompt" rows="4" placeholder="e.g., Count the number of robots and describe their activities..."></textarea>
+                
+                <div class="prompt-suggestions">
+                    <h4>Suggestions:</h4>
+                    <button class="suggestion-btn" data-prompt="Count all visible robots and describe their positions">Robot Count & Positions</button>
+                    <button class="suggestion-btn" data-prompt="Check if any robots appear to be malfunctioning">Malfunction Check</button>
+                    <button class="suggestion-btn" data-prompt="Describe the overall efficiency of robot operations">Efficiency Analysis</button>
+                    <button class="suggestion-btn" data-prompt="Identify any safety concerns in the workspace">Safety Check</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="runAnalysis">Run Analysis</button>
+                <button class="btn btn-secondary modal-close">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Detail Modal -->
+    <div id="alertModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Alert Details</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="alertDetails">
+                <!-- Alert details will be populated here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="acknowledgeAlert">Acknowledge</button>
+                <button class="btn btn-secondary modal-close">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio for alerts -->
+    <audio id="alertSound" preload="auto">
+        <source src="alert.mp3" type="audio/mpeg">
+        <source src="alert.wav" type="audio/wav">
+    </audio>
+
+    <!-- Scripts -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

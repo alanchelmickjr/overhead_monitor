@@ -1,306 +1,744 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Robot Overhead Monitor - Dashboard</title>
-    <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>LLaVA Robot Monitor</title>
+    <style>
+        body {
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            margin: 0;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #1a1a1a;
+            border-radius: 8px;
+        }
+        
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+        }
+        
+        .video-section {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        .video-container {
+            position: relative;
+            background: #000;
+            border: 2px solid #4a9eff;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        #stream {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        #captureCanvas {
+            display: none;
+        }
+        
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background: #357abd;
+        }
+        
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            background: #2a2a2a;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .status.success { border-left: 4px solid #4af542; }
+        .status.error { border-left: 4px solid #ff4444; }
+        .status.warning { border-left: 4px solid #ffaa00; }
+        
+        .config-section {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        .config-section h2 {
+            margin-top: 0;
+            font-size: 20px;
+            color: #4a9eff;
+        }
+        
+        .condition-list {
+            margin-bottom: 20px;
+        }
+        
+        .condition-item {
+            background: #2a2a2a;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .condition-item input[type="checkbox"] {
+            margin-right: 10px;
+        }
+        
+        .condition-item label {
+            flex: 1;
+            cursor: pointer;
+        }
+        
+        .remove-btn {
+            background: #ff4444;
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .add-condition {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .add-condition input {
+            flex: 1;
+            padding: 10px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 4px;
+        }
+        
+        .interval-config {
+            margin-top: 20px;
+            padding: 15px;
+            background: #2a2a2a;
+            border-radius: 4px;
+        }
+        
+        .interval-config label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        .interval-config select {
+            width: 100%;
+            padding: 8px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        
+        .analysis-log {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+            background: #0a0a0a;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .detection-panel {
+            margin-top: 20px;
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #ff4444;
+        }
+        
+        .detection-panel h2 {
+            margin-top: 0;
+            font-size: 20px;
+            color: #ff4444;
+        }
+        
+        .detection-list {
+            max-height: 250px;
+            overflow-y: auto;
+            background: #0a0a0a;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .detection-entry {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: #441111;
+            border-left: 4px solid #ff4444;
+            border-radius: 4px;
+        }
+        
+        .detection-time {
+            color: #ffaa00;
+            font-weight: bold;
+        }
+        
+        .detection-condition {
+            margin-top: 5px;
+            color: #fff;
+        }
+        
+        .log-entry {
+            margin-bottom: 10px;
+            padding: 8px;
+            background: #1a1a1a;
+            border-radius: 4px;
+        }
+        
+        .log-entry.alert {
+            background: #441111;
+            border-left: 4px solid #ff4444;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .stat-item {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4a9eff;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-left">
-                <h1><i class="fas fa-robot"></i> Robot Overhead Monitor</h1>
-                <div class="connection-status">
-                    <span class="status-indicator" id="connectionStatus"></span>
-                    <span id="connectionText">Connecting...</span>
-                </div>
-            </div>
-            <div class="header-right">
-                <button class="btn btn-danger" id="emergencyStop">
-                    <i class="fas fa-stop-circle"></i> Emergency Stop
-                </button>
-                <button class="btn btn-secondary" id="settingsBtn">
-                    <i class="fas fa-cog"></i> Settings
-                </button>
-            </div>
-        </header>
-
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Sidebar -->
-            <aside class="sidebar">
-                <div class="sidebar-section">
-                    <h3>Cameras</h3>
-                    <div id="cameraList" class="camera-list">
-                        <!-- Camera items will be added dynamically -->
-                    </div>
-                </div>
-                
-                <div class="sidebar-section">
-                    <h3>System Status</h3>
-                    <div class="status-grid">
-                        <div class="status-item">
-                            <span class="status-label">Vision API</span>
-                            <span class="status-value" id="visionStatus">--</span>
-                        </div>
-                        <div class="status-item">
-                            <span class="status-label">Database</span>
-                            <span class="status-value" id="dbStatus">--</span>
-                        </div>
-                        <div class="status-item">
-                            <span class="status-label">Alerts</span>
-                            <span class="status-value" id="alertStatus">--</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="sidebar-section">
-                    <h3>Statistics</h3>
-                    <div class="stats-grid">
-                        <div class="stat-item">
-                            <span class="stat-value" id="eventCount">0</span>
-                            <span class="stat-label">Events Today</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-value" id="alertCount">0</span>
-                            <span class="stat-label">Active Alerts</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-value" id="robotCount">0</span>
-                            <span class="stat-label">Robots Active</span>
-                        </div>
-                    </div>
-                </div>
-            </aside>
-
-            <!-- Central Panel -->
-            <main class="central-panel">
-                <!-- Video Feed -->
+        <div class="header">
+            <h1>🤖 LLaVA Robot Monitor</h1>
+            <div id="connectionStatus" class="status">Initializing...</div>
+        </div>
+        
+        <div class="main-grid">
+            <!-- Video Section -->
+            <div class="video-section">
                 <div class="video-container">
-                    <div class="video-header">
-                        <h2 id="cameraTitle">Select a Camera</h2>
-                        <div class="video-controls">
-                            <button class="btn btn-sm" id="startMonitor">
-                                <i class="fas fa-play"></i> Start
-                            </button>
-                            <button class="btn btn-sm" id="stopMonitor">
-                                <i class="fas fa-stop"></i> Stop
-                            </button>
-                            <button class="btn btn-sm" id="captureSnapshot">
-                                <i class="fas fa-camera"></i> Snapshot
-                            </button>
-                            <select id="intervalSelect" class="select-sm">
-                                <option value="100">100ms</option>
-                                <option value="250">250ms</option>
-                                <option value="500" selected>500ms</option>
-                                <option value="1000">1s</option>
-                                <option value="2000">2s</option>
-                            </select>
-                        </div>
+                    <img id="stream" src="http://localhost:3001/stream.mjpeg" alt="Camera Stream">
+                    <canvas id="captureCanvas"></canvas>
+                </div>
+                
+                <div class="controls">
+                    <button id="startMonitoring">Start Monitoring</button>
+                    <button id="stopMonitoring" disabled>Stop Monitoring</button>
+                    <button id="captureNow">Capture & Analyze Now</button>
+                    <button id="clearLog">Clear Log</button>
+                </div>
+                
+                <div class="stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="frameCount">0</div>
+                        <div class="stat-label">Frames Analyzed</div>
                     </div>
-                    <div class="video-wrapper">
-                        <canvas id="videoCanvas" width="1280" height="720"></canvas>
-                        <div class="video-overlay" id="videoOverlay">
-                            <!-- Zone overlays will be drawn here -->
-                        </div>
-                        <div class="no-feed" id="noFeed">
-                            <i class="fas fa-video-slash"></i>
-                            <p>No video feed available</p>
-                        </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="alertCount">0</div>
+                        <div class="stat-label">Alerts</div>
                     </div>
-                    <div class="video-info">
-                        <span>FPS: <span id="fps">--</span></span>
-                        <span>Resolution: <span id="resolution">--</span></span>
-                        <span>Latency: <span id="latency">--</span>ms</span>
+                    <div class="stat-item">
+                        <div class="stat-value" id="uptimeHours">0</div>
+                        <div class="stat-label">Hours Running</div>
                     </div>
                 </div>
-
-                <!-- Analysis Panel -->
-                <div class="analysis-panel">
-                    <div class="analysis-header">
-                        <h3>Real-time Analysis</h3>
-                        <button class="btn btn-sm" id="customAnalysis">
-                            <i class="fas fa-brain"></i> Custom Prompt
-                        </button>
-                    </div>
-                    <div class="analysis-content" id="analysisContent">
-                        <p class="analysis-placeholder">Analysis results will appear here...</p>
-                    </div>
-                </div>
-            </main>
-
-            <!-- Right Panel -->
-            <aside class="right-panel">
-                <!-- Alerts Section -->
-                <div class="panel-section">
-                    <div class="section-header">
-                        <h3>Alerts</h3>
-                        <span class="badge" id="alertBadge">0</span>
-                    </div>
-                    <div class="alert-list" id="alertList">
-                        <!-- Alerts will be added dynamically -->
-                    </div>
-                </div>
-
-                <!-- Events Section -->
-                <div class="panel-section">
-                    <div class="section-header">
-                        <h3>Recent Events</h3>
-                        <button class="btn btn-sm" id="clearEvents">Clear</button>
-                    </div>
-                    <div class="event-list" id="eventList">
-                        <!-- Events will be added dynamically -->
-                    </div>
-                </div>
-
-                <!-- Robot Status -->
-                <div class="panel-section">
-                    <div class="section-header">
-                        <h3>Robot Status</h3>
-                    </div>
-                    <div class="robot-list" id="robotList">
-                        <!-- Robot status items will be added dynamically -->
-                    </div>
-                </div>
-            </aside>
-        </div>
-
-        <!-- Footer -->
-        <footer class="footer">
-            <div class="footer-left">
-                <span>© 2024 Robot Overhead Monitor</span>
             </div>
-            <div class="footer-center">
-                <span id="systemTime"></span>
-            </div>
-            <div class="footer-right">
-                <span>v1.0.0</span>
-            </div>
-        </footer>
-    </div>
-
-    <!-- Modals -->
-    <!-- Settings Modal -->
-    <div id="settingsModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Settings</h2>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="settings-section">
-                    <h3>Detection Thresholds</h3>
-                    <div class="setting-item">
-                        <label>Robot Tipped Confidence</label>
-                        <input type="range" id="tippedThreshold" min="0" max="100" value="85">
-                        <span id="tippedThresholdValue">85%</span>
+            
+            <!-- Configuration Section -->
+            <div class="config-section">
+                <h2>Detection Conditions</h2>
+                
+                <div class="condition-list" id="conditionList">
+                    <!-- Default conditions -->
+                    <div class="condition-item">
+                        <input type="checkbox" id="cond1" checked>
+                        <label for="cond1">Robot tipped over or fallen</label>
+                        <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
                     </div>
-                    <div class="setting-item">
-                        <label>Collision Detection Confidence</label>
-                        <input type="range" id="collisionThreshold" min="0" max="100" value="80">
-                        <span id="collisionThresholdValue">80%</span>
+                    <div class="condition-item">
+                        <input type="checkbox" id="cond2" checked>
+                        <label for="cond2">Robot stuck or not moving</label>
+                        <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
+                    </div>
+                    <div class="condition-item">
+                        <input type="checkbox" id="cond3">
+                        <label for="cond3">Robots colliding with each other</label>
+                        <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
+                    </div>
+                    <div class="condition-item">
+                        <input type="checkbox" id="cond4">
+                        <label for="cond4">Ball stuck in cup (scoring event)</label>
+                        <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
                     </div>
                 </div>
                 
-                <div class="settings-section">
-                    <h3>Alert Channels</h3>
-                    <div class="setting-item">
-                        <label>
-                            <input type="checkbox" id="emailAlerts" checked> Email Notifications
-                        </label>
-                    </div>
-                    <div class="setting-item">
-                        <label>
-                            <input type="checkbox" id="smsAlerts"> SMS Notifications
-                        </label>
-                    </div>
-                    <div class="setting-item">
-                        <label>
-                            <input type="checkbox" id="soundAlerts" checked> Sound Alerts
-                        </label>
-                    </div>
+                <div class="add-condition">
+                    <input type="text" id="newCondition" placeholder="Add custom condition...">
+                    <button onclick="addCondition()">Add</button>
                 </div>
                 
-                <div class="settings-section">
-                    <h3>Display Options</h3>
-                    <div class="setting-item">
-                        <label>
-                            <input type="checkbox" id="showZones" checked> Show Zone Overlays
-                        </label>
-                    </div>
-                    <div class="setting-item">
-                        <label>
-                            <input type="checkbox" id="showRobotIds" checked> Show Robot IDs
-                        </label>
-                    </div>
-                    <div class="setting-item">
-                        <label>
-                            <input type="checkbox" id="darkMode"> Dark Mode
-                        </label>
-                    </div>
+                <div class="interval-config">
+                    <label for="analysisInterval">Analysis Interval:</label>
+                    <select id="analysisInterval">
+                        <option value="10000">Every 10 seconds</option>
+                        <option value="30000" selected>Every 30 seconds</option>
+                        <option value="60000">Every minute</option>
+                        <option value="120000">Every 2 minutes</option>
+                        <option value="300000">Every 5 minutes</option>
+                    </select>
                 </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-primary" id="saveSettings">Save Settings</button>
-                <button class="btn btn-secondary modal-close">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Custom Analysis Modal -->
-    <div id="analysisModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Custom Analysis</h2>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <label for="customPrompt">Enter your analysis prompt:</label>
-                <textarea id="customPrompt" rows="4" placeholder="e.g., Count the number of robots and describe their activities..."></textarea>
                 
-                <div class="prompt-suggestions">
-                    <h4>Suggestions:</h4>
-                    <button class="suggestion-btn" data-prompt="Count all visible robots and describe their positions">Robot Count & Positions</button>
-                    <button class="suggestion-btn" data-prompt="Check if any robots appear to be malfunctioning">Malfunction Check</button>
-                    <button class="suggestion-btn" data-prompt="Describe the overall efficiency of robot operations">Efficiency Analysis</button>
-                    <button class="suggestion-btn" data-prompt="Identify any safety concerns in the workspace">Safety Check</button>
+                <div class="interval-config">
+                    <label for="smolvlmUrl">LLaVA API URL:</label>
+                    <input type="text" id="smolvlmUrl" value="http://localhost:8080/v1/chat/completions" style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px;">
+                </div>
+                
+                <h2 style="margin-top: 30px;">Analysis Log</h2>
+                <div class="analysis-log" id="analysisLog"></div>
+                
+                <!-- Detection Panel -->
+                <div class="detection-panel">
+                    <h2>🚨 Detected Events</h2>
+                    <div class="detection-list" id="detectionList">
+                        <div style="color: #666; text-align: center;">No detections yet...</div>
+                    </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button class="btn btn-primary" id="runAnalysis">Run Analysis</button>
-                <button class="btn btn-secondary modal-close">Cancel</button>
-            </div>
         </div>
     </div>
-
-    <!-- Alert Detail Modal -->
-    <div id="alertModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Alert Details</h2>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body" id="alertDetails">
-                <!-- Alert details will be populated here -->
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-primary" id="acknowledgeAlert">Acknowledge</button>
-                <button class="btn btn-secondary modal-close">Close</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Audio for alerts -->
-    <audio id="alertSound" preload="auto">
-        <source src="alert.mp3" type="audio/mpeg">
-        <source src="alert.wav" type="audio/wav">
-    </audio>
-
-    <!-- Scripts -->
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="app.js"></script>
+    
+    <script>
+        // Configuration
+        let monitoringActive = false;
+        let monitoringInterval = null;
+        let startTime = null;
+        let stats = {
+            frames: 0,
+            alerts: 0
+        };
+        
+        // DOM elements
+        const stream = document.getElementById('stream');
+        const canvas = document.getElementById('captureCanvas');
+        const ctx = canvas.getContext('2d');
+        const log = document.getElementById('analysisLog');
+        const connectionStatus = document.getElementById('connectionStatus');
+        
+        // Initialize
+        window.onload = () => {
+            updateConnectionStatus('Connected to camera stream', 'success');
+            loadSettings();
+            updateStats();
+            
+            // Check stream status
+            stream.onerror = () => {
+                updateConnectionStatus('Camera stream disconnected', 'error');
+            };
+            stream.onload = () => {
+                updateConnectionStatus('Camera stream connected', 'success');
+            };
+        };
+        
+        // Start monitoring
+        document.getElementById('startMonitoring').onclick = () => {
+            monitoringActive = true;
+            startTime = Date.now();
+            
+            const interval = parseInt(document.getElementById('analysisInterval').value);
+            monitoringInterval = setInterval(captureAndAnalyze, interval);
+            
+            document.getElementById('startMonitoring').disabled = true;
+            document.getElementById('stopMonitoring').disabled = false;
+            
+            addLogEntry('Monitoring started', 'info');
+            saveSettings();
+            
+            // Initial capture
+            captureAndAnalyze();
+        };
+        
+        // Stop monitoring
+        document.getElementById('stopMonitoring').onclick = () => {
+            monitoringActive = false;
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+                monitoringInterval = null;
+            }
+            
+            document.getElementById('startMonitoring').disabled = false;
+            document.getElementById('stopMonitoring').disabled = true;
+            
+            addLogEntry('Monitoring stopped', 'info');
+        };
+        
+        // Manual capture
+        document.getElementById('captureNow').onclick = captureAndAnalyze;
+        
+        // Clear log
+        document.getElementById('clearLog').onclick = () => {
+            log.innerHTML = '';
+            stats.frames = 0;
+            stats.alerts = 0;
+            updateStats();
+        };
+        
+        // Capture and analyze frame
+        async function captureAndAnalyze() {
+            try {
+                // Get snapshot from server (avoids CORS nightmare)
+                addLogEntry('Capturing frame from server...', 'info');
+                
+                const response = await fetch('http://localhost:3001/snapshot.jpg');
+                if (!response.ok) {
+                    throw new Error('Failed to capture snapshot');
+                }
+                
+                const blob = await response.blob();
+                const reader = new FileReader();
+                
+                const imageData = await new Promise((resolve, reject) => {
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                
+                // Get active conditions
+                const conditions = getActiveConditions();
+                if (conditions.length === 0) {
+                    addLogEntry('No conditions selected', 'warning');
+                    return;
+                }
+                
+                // Build prompt
+                const prompt = `Analyze this robot pen image for the following conditions:\n${conditions.map((c, i) => `${i+1}. ${c}`).join('\n')}\n\nFor each condition, respond with YES or NO followed by a brief explanation. Be specific about what you observe.`;
+                
+                // Call LLaVA API
+                const result = await callLLaVA(imageData, prompt);
+                
+                // Process result
+                stats.frames++;
+                processAnalysisResult(result, conditions);
+                updateStats();
+                
+            } catch (error) {
+                addLogEntry(`Error: ${error.message}`, 'error');
+                updateConnectionStatus('Analysis error - retrying...', 'error');
+                
+                // Retry after delay
+                if (monitoringActive) {
+                    setTimeout(captureAndAnalyze, 5000);
+                }
+            }
+        }
+        
+        // Call LLaVA API through proxy (avoids CORS)
+        async function callLLaVA(imageData, prompt) {
+            const apiUrl = document.getElementById('smolvlmUrl').value;
+            
+            try {
+                // Use proxy endpoint to avoid CORS issues
+                const response = await fetch('http://localhost:3001/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: imageData,
+                        prompt: prompt,
+                        apiUrl: apiUrl
+                    })
+                });
+                
+                if (!response.ok) {
+                    let errorMsg = `API error: ${response.status}`;
+                    try {
+                        const error = await response.json();
+                        errorMsg = error.details || error.error || errorMsg;
+                    } catch (e) {
+                        // If response isn't JSON, just use status
+                    }
+                    throw new Error(errorMsg);
+                }
+                
+                const data = await response.json();
+                if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+                    throw new Error('Invalid response format from LLaVA');
+                }
+                return data.choices[0].message.content;
+            } catch (error) {
+                // Re-throw with more context
+                throw new Error(`LLaVA API Error: ${error.message}`);
+            }
+        }
+        
+        // Process analysis result
+        function processAnalysisResult(result, conditions) {
+            const lines = result.split('\n');
+            let hasAlert = false;
+            let summary = [];
+            
+            conditions.forEach((condition, index) => {
+                const line = lines.find(l => l.includes(`${index + 1}.`)) || '';
+                const hasIssue = line.toUpperCase().includes('YES');
+                
+                if (hasIssue) {
+                    hasAlert = true;
+                    stats.alerts++;
+                    summary.push(`⚠️ ${condition}: ${line}`);
+                }
+            });
+            
+            if (hasAlert) {
+                addLogEntry(summary.join('\n'), 'alert');
+                updateConnectionStatus('Alert detected!', 'warning');
+                
+                // Add to detection panel
+                addDetection(summary);
+                
+                // Save alert to localStorage for redundancy
+                saveAlert({
+                    timestamp: new Date().toISOString(),
+                    conditions: summary,
+                    fullResult: result
+                });
+            } else {
+                addLogEntry(`Frame ${stats.frames}: All conditions normal`, 'success');
+                updateConnectionStatus('All systems normal', 'success');
+            }
+        }
+        
+        // Add detection to dedicated panel
+        function addDetection(conditions) {
+            const detectionList = document.getElementById('detectionList');
+            
+            // Clear placeholder if this is first detection
+            if (detectionList.querySelector('div[style*="color: #666"]')) {
+                detectionList.innerHTML = '';
+            }
+            
+            const entry = document.createElement('div');
+            entry.className = 'detection-entry';
+            
+            const time = document.createElement('div');
+            time.className = 'detection-time';
+            time.textContent = new Date().toLocaleTimeString();
+            entry.appendChild(time);
+            
+            conditions.forEach(condition => {
+                const condDiv = document.createElement('div');
+                condDiv.className = 'detection-condition';
+                condDiv.textContent = condition;
+                entry.appendChild(condDiv);
+            });
+            
+            detectionList.insertBefore(entry, detectionList.firstChild);
+            
+            // Keep only last 50 detections
+            while (detectionList.children.length > 50) {
+                detectionList.removeChild(detectionList.lastChild);
+            }
+        }
+        
+        // Get active conditions
+        function getActiveConditions() {
+            const conditions = [];
+            document.querySelectorAll('.condition-item').forEach(item => {
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                const label = item.querySelector('label');
+                if (checkbox.checked) {
+                    conditions.push(label.textContent);
+                }
+            });
+            return conditions;
+        }
+        
+        // Add condition
+        function addCondition() {
+            const input = document.getElementById('newCondition');
+            const text = input.value.trim();
+            if (!text) return;
+            
+            const id = 'cond' + Date.now();
+            const html = `
+                <div class="condition-item">
+                    <input type="checkbox" id="${id}" checked>
+                    <label for="${id}">${text}</label>
+                    <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
+                </div>
+            `;
+            
+            document.getElementById('conditionList').insertAdjacentHTML('beforeend', html);
+            input.value = '';
+            saveSettings();
+        }
+        
+        // Remove condition
+        function removeCondition(btn) {
+            btn.parentElement.remove();
+            saveSettings();
+        }
+        
+        // Update stats
+        function updateStats() {
+            document.getElementById('frameCount').textContent = stats.frames;
+            document.getElementById('alertCount').textContent = stats.alerts;
+            
+            if (startTime) {
+                const hours = ((Date.now() - startTime) / 3600000).toFixed(1);
+                document.getElementById('uptimeHours').textContent = hours;
+            }
+        }
+        
+        // Add log entry
+        function addLogEntry(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type === 'alert' ? 'alert' : ''}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.insertBefore(entry, log.firstChild);
+            
+            // Keep only last 100 entries
+            while (log.children.length > 100) {
+                log.removeChild(log.lastChild);
+            }
+        }
+        
+        // Update connection status
+        function updateConnectionStatus(message, type) {
+            connectionStatus.textContent = message;
+            connectionStatus.className = `status ${type}`;
+        }
+        
+        // Save settings to localStorage
+        function saveSettings() {
+            const settings = {
+                conditions: [],
+                interval: document.getElementById('analysisInterval').value,
+                apiUrl: document.getElementById('smolvlmUrl').value
+            };
+            
+            document.querySelectorAll('.condition-item').forEach(item => {
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                const label = item.querySelector('label');
+                settings.conditions.push({
+                    text: label.textContent,
+                    checked: checkbox.checked
+                });
+            });
+            
+            localStorage.setItem('llava-monitor-settings', JSON.stringify(settings));
+        }
+        
+        // Load settings from localStorage
+        function loadSettings() {
+            const saved = localStorage.getItem('llava-monitor-settings');
+            if (!saved) return;
+            
+            try {
+                const settings = JSON.parse(saved);
+                
+                // Load API URL
+                if (settings.apiUrl) {
+                    document.getElementById('smolvlmUrl').value = settings.apiUrl;
+                }
+                
+                // Load interval
+                if (settings.interval) {
+                    document.getElementById('analysisInterval').value = settings.interval;
+                }
+                
+                // Load conditions
+                if (settings.conditions && settings.conditions.length > 0) {
+                    document.getElementById('conditionList').innerHTML = '';
+                    settings.conditions.forEach((cond, i) => {
+                        const id = 'cond' + i;
+                        const html = `
+                            <div class="condition-item">
+                                <input type="checkbox" id="${id}" ${cond.checked ? 'checked' : ''}>
+                                <label for="${id}">${cond.text}</label>
+                                <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
+                            </div>
+                        `;
+                        document.getElementById('conditionList').insertAdjacentHTML('beforeend', html);
+                    });
+                }
+            } catch (e) {
+                console.error('Error loading settings:', e);
+            }
+        }
+        
+        // Save alert for redundancy
+        function saveAlert(alert) {
+            const alerts = JSON.parse(localStorage.getItem('llava-alerts') || '[]');
+            alerts.push(alert);
+            
+            // Keep only last 100 alerts
+            if (alerts.length > 100) {
+                alerts.splice(0, alerts.length - 100);
+            }
+            
+            localStorage.setItem('llava-alerts', JSON.stringify(alerts));
+        }
+        
+        // Auto-save settings on change
+        document.getElementById('analysisInterval').onchange = saveSettings;
+        document.getElementById('smolvlmUrl').onchange = saveSettings;
+    </script>
 </body>
 </html>

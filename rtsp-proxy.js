@@ -93,14 +93,35 @@ function startFFmpeg() {
             const boundary = Buffer.from(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`);
             const frameData = Buffer.concat([boundary, frame, Buffer.from('\r\n')]);
             
+            // Send to all connected clients with proper cleanup
+            const clientsToRemove = new Set();
             for (const client of clients) {
                 try {
-                    if (!client.destroyed && !client.finished) {
-                        client.write(frameData);
+                    if (client.destroyed || client.finished || !client.writable) {
+                        clientsToRemove.add(client);
+                        continue;
+                    }
+                    client.write(frameData);
+                } catch (err) {
+                    log(`Client write error: ${err.message}`, 'DEBUG');
+                    clientsToRemove.add(client);
+                }
+            }
+            
+            // Clean up dead clients
+            for (const deadClient of clientsToRemove) {
+                clients.delete(deadClient);
+                try {
+                    if (!deadClient.destroyed) {
+                        deadClient.destroy();
                     }
                 } catch (err) {
-                    // Client disconnected, will be cleaned up
+                    // Already destroyed
                 }
+            }
+            
+            if (clientsToRemove.size > 0) {
+                log(`Cleaned up ${clientsToRemove.size} dead clients (Remaining: ${clients.size})`, 'DEBUG');
             }
             
             frameCount++;
@@ -134,11 +155,36 @@ function startFFmpeg() {
     });
 }
 
-// Stop FFmpeg if no clients
+// Stop FFmpeg if no clients (with cleanup)
 function stopFFmpegIfNoClients() {
+    // Clean up any remaining dead clients first
+    const deadClients = [];
+    for (const client of clients) {
+        if (client.destroyed || client.finished || !client.writable) {
+            deadClients.push(client);
+        }
+    }
+    
+    for (const deadClient of deadClients) {
+        clients.delete(deadClient);
+    }
+    
+    if (deadClients.length > 0) {
+        log(`Cleaned up ${deadClients.length} dead clients during FFmpeg check`, 'DEBUG');
+    }
+    
     if (clients.size === 0 && ffmpegProcess) {
         log('No clients connected, stopping FFmpeg', 'INFO');
-        ffmpegProcess.kill();
+        try {
+            ffmpegProcess.kill('SIGTERM');
+            setTimeout(() => {
+                if (ffmpegProcess && !ffmpegProcess.killed) {
+                    ffmpegProcess.kill('SIGKILL');
+                }
+            }, 5000);
+        } catch (err) {
+            log(`Error stopping FFmpeg: ${err.message}`, 'ERROR');
+        }
         ffmpegProcess = null;
         frameBuffer = [];
     }
@@ -174,14 +220,35 @@ app.get('/stream.mjpeg', (req, res) => {
         startFFmpeg();
     }
     
-    // Handle client disconnect
-    req.on('close', () => {
-        clients.delete(res);
-        log(`Client disconnected: ${clientId} (Remaining: ${clients.size})`, 'INFO');
-        
-        // Delay stopping FFmpeg to handle quick reconnects
-        setTimeout(stopFFmpegIfNoClients, 5000);
+    // Handle all possible disconnect scenarios
+    const cleanupClient = () => {
+        if (clients.has(res)) {
+            clients.delete(res);
+            log(`Client disconnected: ${clientId} (Remaining: ${clients.size})`, 'INFO');
+            
+            // Ensure response is properly closed
+            try {
+                if (!res.destroyed && !res.finished) {
+                    res.end();
+                }
+            } catch (err) {
+                // Already closed
+            }
+            
+            // Delay stopping FFmpeg to handle quick reconnects
+            setTimeout(stopFFmpegIfNoClients, 5000);
+        }
+    };
+    
+    // Multiple disconnect event handlers
+    req.on('close', cleanupClient);
+    req.on('aborted', cleanupClient);
+    res.on('close', cleanupClient);
+    res.on('error', (err) => {
+        log(`Client response error: ${err.message}`, 'DEBUG');
+        cleanupClient();
     });
+    res.on('finish', cleanupClient);
 });
 
 // Snapshot endpoint
@@ -234,10 +301,10 @@ app.get('/snapshot.jpg', async (req, res) => {
     }
 });
 
-// SmolVLM proxy endpoint to avoid CORS
+// LLaVA proxy endpoint to avoid CORS
 app.use(express.json({ limit: '10mb' }));
 app.post('/analyze', async (req, res) => {
-    log('🧠 SmolVLM analysis requested', 'INFO');
+    log('🧠 LLaVA analysis requested', 'INFO');
     
     const { image, prompt, apiUrl } = req.body;
     const url = apiUrl || 'http://localhost:8080/v1/chat/completions';
@@ -247,7 +314,7 @@ app.post('/analyze', async (req, res) => {
         const axios = require('axios');
         
         const response = await axios.post(url, {
-            model: 'smolvlm-instruct',
+            model: 'llava-v1.5-7b-q4-k-m',
             messages: [{
                 role: 'user',
                 content: [
@@ -265,15 +332,15 @@ app.post('/analyze', async (req, res) => {
         });
         
         res.json(response.data);
-        log('✅ SmolVLM analysis completed', 'SUCCESS');
+        log('✅ LLaVA analysis completed', 'SUCCESS');
         
     } catch (error) {
         const errorDetails = error.response?.data || error.message || 'Unknown error';
-        log(`❌ SmolVLM error: ${JSON.stringify(errorDetails)}`, 'ERROR');
+        log(`❌ LLaVA error: ${JSON.stringify(errorDetails)}`, 'ERROR');
         
         // Check if it's a connection error
         if (error.code === 'ECONNREFUSED') {
-            log('SmolVLM server not running on ' + url, 'ERROR');
+            log('LLaVA server not running on ' + url, 'ERROR');
         }
         
         res.status(500).json({
