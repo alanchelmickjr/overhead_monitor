@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>LLaVA Robot Monitor</title>
+    <title>SmolVLM Robot Monitor</title>
     <style>
         body {
             background: #000;
@@ -261,13 +261,141 @@
             color: #888;
             margin-top: 5px;
         }
+        
+        /* Model Selector Styles */
+        .model-info {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        
+        .model-info .metric {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }
+        
+        .model-info .metric-label {
+            color: #888;
+        }
+        
+        .model-info .metric-value {
+            color: #4a9eff;
+            font-weight: bold;
+        }
+        
+        /* Modal Styles */
+        .modal {
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: none;
+        }
+        
+        .modal-content {
+            background-color: #1a1a1a;
+            margin: 5% auto;
+            padding: 20px;
+            border: 2px solid #4a9eff;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+            color: #4a9eff;
+        }
+        
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover,
+        .close:focus {
+            color: #fff;
+        }
+        
+        .benchmark-results {
+            display: grid;
+            gap: 15px;
+        }
+        
+        .model-result {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #4a9eff;
+        }
+        
+        .model-result.best {
+            border-left-color: #4af542;
+        }
+        
+        .model-result h3 {
+            margin: 0 0 10px 0;
+            color: #4a9eff;
+        }
+        
+        .benchmark-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        
+        .benchmark-metric {
+            text-align: center;
+            padding: 10px;
+            background: #1a1a1a;
+            border-radius: 4px;
+        }
+        
+        .benchmark-metric-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #4a9eff;
+        }
+        
+        .benchmark-metric-label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤖 LLaVA Robot Monitor</h1>
-            <div id="connectionStatus" class="status">Initializing...</div>
+            <h1>🤖 Robot Monitor</h1>
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <div class="model-selector-container" style="display: flex; align-items: center; gap: 10px;">
+                    <label for="modelSelector" style="color: #888;">Model:</label>
+                    <select id="modelSelector" style="padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px;">
+                        <option value="">Loading...</option>
+                    </select>
+                    <button id="benchmarkBtn" style="padding: 8px 12px; background: #ffaa00;" title="Benchmark Models">⚡</button>
+                    <button id="compareBtn" style="padding: 8px 12px; background: #4af542;" title="Compare Models">📊</button>
+                </div>
+                <div id="connectionStatus" class="status">Initializing...</div>
+            </div>
         </div>
         
         <div class="main-grid">
@@ -346,8 +474,29 @@
                 </div>
                 
                 <div class="interval-config">
-                    <label for="smolvlmUrl">LLaVA API URL:</label>
+                    <label for="smolvlmUrl">Vision API URL:</label>
                     <input type="text" id="smolvlmUrl" value="http://localhost:8080/v1/chat/completions" style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px;">
+                </div>
+                
+                <!-- Model Info -->
+                <div class="model-info" id="modelInfo" style="display: none;">
+                    <h3 style="margin-top: 0; color: #4a9eff;">Current Model</h3>
+                    <div class="metric">
+                        <span class="metric-label">Model:</span>
+                        <span class="metric-value" id="currentModelName">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Processing Time:</span>
+                        <span class="metric-value" id="avgProcessingTime">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Success Rate:</span>
+                        <span class="metric-value" id="successRate">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Hardware:</span>
+                        <span class="metric-value" id="hardwareProfile">-</span>
+                    </div>
                 </div>
                 
                 <h2 style="margin-top: 30px;">Analysis Log</h2>
@@ -364,6 +513,53 @@
         </div>
     </div>
     
+    <!-- Benchmark Modal -->
+    <div id="benchmarkModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Model Benchmark Results</h2>
+                <span class="close" onclick="closeBenchmarkModal()">&times;</span>
+            </div>
+            <div id="benchmarkStatus" style="text-align: center; padding: 20px;">
+                <div class="status info">Ready to benchmark models...</div>
+            </div>
+            <div id="benchmarkResults" class="benchmark-results"></div>
+            <div style="margin-top: 20px; text-align: center;">
+                <button id="startBenchmark" onclick="startBenchmark()">Start Benchmark</button>
+                <button id="applyBestModel" style="display: none; background: #4af542;" onclick="applyBestModel()">Apply Best Model</button>
+                <button onclick="exportBenchmarkResults()">Export Results</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Compare Modal -->
+    <div id="compareModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Compare Models</h2>
+                <span class="close" onclick="closeCompareModal()">&times;</span>
+            </div>
+            <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                <div style="flex: 1;">
+                    <label>Model 1:</label>
+                    <select id="compareModel1" style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px;">
+                        <option value="">Select model...</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label>Model 2:</label>
+                    <select id="compareModel2" style="width: 100%; padding: 8px; background: #333; color: white; border: 1px solid #555; border-radius: 4px;">
+                        <option value="">Select model...</option>
+                    </select>
+                </div>
+            </div>
+            <div style="text-align: center; margin-bottom: 20px;">
+                <button onclick="compareModels()">Compare</button>
+            </div>
+            <div id="compareResults"></div>
+        </div>
+    </div>
+    
     <script>
         // Configuration
         let monitoringActive = false;
@@ -374,6 +570,12 @@
             alerts: 0
         };
         
+        // Model management
+        let availableModels = [];
+        let currentModel = null;
+        let bestModelId = null;
+        let benchmarkResults = {};
+        
         // DOM elements
         const stream = document.getElementById('stream');
         const canvas = document.getElementById('captureCanvas');
@@ -382,10 +584,13 @@
         const connectionStatus = document.getElementById('connectionStatus');
         
         // Initialize
-        window.onload = () => {
+        window.onload = async () => {
             updateConnectionStatus('Connected to camera stream', 'success');
             loadSettings();
             updateStats();
+            
+            // Load available models
+            await loadAvailableModels();
             
             // Check stream status
             stream.onerror = () => {
@@ -393,6 +598,24 @@
             };
             stream.onload = () => {
                 updateConnectionStatus('Camera stream connected', 'success');
+            };
+            
+            // Model selector change event
+            document.getElementById('modelSelector').onchange = async (e) => {
+                if (e.target.value) {
+                    await switchModel(e.target.value);
+                }
+            };
+            
+            // Benchmark button
+            document.getElementById('benchmarkBtn').onclick = () => {
+                document.getElementById('benchmarkModal').style.display = 'block';
+            };
+            
+            // Compare button
+            document.getElementById('compareBtn').onclick = () => {
+                populateCompareSelects();
+                document.getElementById('compareModal').style.display = 'block';
             };
         };
         
@@ -469,8 +692,8 @@
                 // Build prompt
                 const prompt = `Analyze this robot pen image for the following conditions:\n${conditions.map((c, i) => `${i+1}. ${c}`).join('\n')}\n\nFor each condition, respond with YES or NO followed by a brief explanation. Be specific about what you observe.`;
                 
-                // Call LLaVA API
-                const result = await callLLaVA(imageData, prompt);
+                // Call SmolVLM API
+                const result = await callSmolVLM(imageData, prompt);
                 
                 // Process result
                 stats.frames++;
@@ -488,8 +711,8 @@
             }
         }
         
-        // Call LLaVA API through proxy (avoids CORS)
-        async function callLLaVA(imageData, prompt) {
+        // Call Vision API through proxy (avoids CORS)
+        async function callSmolVLM(imageData, prompt) {
             const apiUrl = document.getElementById('smolvlmUrl').value;
             
             try {
@@ -502,7 +725,8 @@
                     body: JSON.stringify({
                         image: imageData,
                         prompt: prompt,
-                        apiUrl: apiUrl
+                        apiUrl: apiUrl,
+                        model: currentModel?.id || 'smolvlm-500m'
                     })
                 });
                 
@@ -519,12 +743,88 @@
                 
                 const data = await response.json();
                 if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-                    throw new Error('Invalid response format from LLaVA');
+                    throw new Error('Invalid response format from Vision API');
                 }
                 return data.choices[0].message.content;
             } catch (error) {
                 // Re-throw with more context
-                throw new Error(`LLaVA API Error: ${error.message}`);
+                throw new Error(`Vision API Error: ${error.message}`);
+            }
+        }
+        
+        // Model Management Functions
+        async function loadAvailableModels() {
+            try {
+                const response = await fetch('http://localhost:3001/models');
+                if (!response.ok) throw new Error('Failed to load models');
+                
+                const data = await response.json();
+                availableModels = data.models || [];
+                currentModel = data.current || availableModels[0];
+                
+                // Populate model selector
+                const selector = document.getElementById('modelSelector');
+                selector.innerHTML = '';
+                
+                availableModels.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id;
+                    option.textContent = `${model.name} (${model.performance?.size || 'unknown'})`;
+                    if (model.recommended) {
+                        option.textContent += ' ⭐';
+                    }
+                    if (currentModel && model.id === currentModel.id) {
+                        option.selected = true;
+                    }
+                    selector.appendChild(option);
+                });
+                
+                updateModelInfo();
+                
+            } catch (error) {
+                console.error('Error loading models:', error);
+                addLogEntry('Failed to load model list', 'error');
+            }
+        }
+        
+        async function switchModel(modelId) {
+            try {
+                const response = await fetch('http://localhost:3001/models/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ modelId })
+                });
+                
+                if (!response.ok) throw new Error('Failed to switch model');
+                
+                const result = await response.json();
+                currentModel = result.model;
+                
+                addLogEntry(`Switched to model: ${currentModel.name}`, 'success');
+                updateModelInfo();
+                saveSettings();
+                
+            } catch (error) {
+                console.error('Error switching model:', error);
+                addLogEntry('Failed to switch model', 'error');
+            }
+        }
+        
+        function updateModelInfo() {
+            if (!currentModel) return;
+            
+            document.getElementById('modelInfo').style.display = 'block';
+            document.getElementById('currentModelName').textContent = currentModel.name;
+            document.getElementById('hardwareProfile').textContent = currentModel.hardware?.join(', ') || 'All';
+            
+            // Update performance metrics if available
+            if (currentModel.performance) {
+                document.getElementById('avgProcessingTime').textContent =
+                    currentModel.performance.avgProcessingTime ?
+                    `${currentModel.performance.avgProcessingTime}ms` : '-';
+                document.getElementById('successRate').textContent =
+                    currentModel.performance.successRate ?
+                    `${(currentModel.performance.successRate * 100).toFixed(1)}%` : '-';
             }
         }
         
@@ -646,6 +946,227 @@
             }
         }
         
+        // Benchmark Functions
+        async function startBenchmark() {
+            document.getElementById('benchmarkStatus').innerHTML =
+                '<div class="status info">Capturing test frame...</div>';
+            
+            try {
+                // Capture test frame
+                const response = await fetch('http://localhost:3001/snapshot.jpg');
+                if (!response.ok) throw new Error('Failed to capture test frame');
+                
+                const blob = await response.blob();
+                const reader = new FileReader();
+                const testFrame = await new Promise((resolve, reject) => {
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                
+                document.getElementById('benchmarkStatus').innerHTML =
+                    '<div class="status info">Running benchmark on all models...</div>';
+                
+                // Run benchmark
+                const benchmarkResponse = await fetch('http://localhost:3001/models/benchmark', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ testFrame })
+                });
+                
+                if (!benchmarkResponse.ok) throw new Error('Benchmark failed');
+                
+                const results = await benchmarkResponse.json();
+                benchmarkResults = results.results;
+                bestModelId = results.bestModel;
+                
+                displayBenchmarkResults(results);
+                
+            } catch (error) {
+                console.error('Benchmark error:', error);
+                document.getElementById('benchmarkStatus').innerHTML =
+                    `<div class="status error">Benchmark failed: ${error.message}</div>`;
+            }
+        }
+        
+        function displayBenchmarkResults(results) {
+            const container = document.getElementById('benchmarkResults');
+            container.innerHTML = '';
+            
+            // Sort by performance
+            const sortedModels = Object.entries(results.results)
+                .sort((a, b) => {
+                    const scoreA = a[1].successRate * 1000 / a[1].avgProcessingTime;
+                    const scoreB = b[1].successRate * 1000 / b[1].avgProcessingTime;
+                    return scoreB - scoreA;
+                });
+            
+            sortedModels.forEach(([modelId, result]) => {
+                const isBest = modelId === results.bestModel;
+                const modelDiv = document.createElement('div');
+                modelDiv.className = `model-result ${isBest ? 'best' : ''}`;
+                
+                const model = availableModels.find(m => m.id === modelId);
+                modelDiv.innerHTML = `
+                    <h3>${model?.name || modelId} ${isBest ? '👑 Best' : ''}</h3>
+                    <div class="benchmark-metrics">
+                        <div class="benchmark-metric">
+                            <div class="benchmark-metric-value">${result.avgProcessingTime.toFixed(0)}ms</div>
+                            <div class="benchmark-metric-label">Avg Time</div>
+                        </div>
+                        <div class="benchmark-metric">
+                            <div class="benchmark-metric-value">${(result.successRate * 100).toFixed(1)}%</div>
+                            <div class="benchmark-metric-label">Success Rate</div>
+                        </div>
+                        <div class="benchmark-metric">
+                            <div class="benchmark-metric-value">${(result.avgConfidence * 100).toFixed(1)}%</div>
+                            <div class="benchmark-metric-label">Confidence</div>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(modelDiv);
+            });
+            
+            document.getElementById('benchmarkStatus').innerHTML =
+                `<div class="status success">Benchmark complete! ${results.recommendation}</div>`;
+            document.getElementById('applyBestModel').style.display = 'inline-block';
+        }
+        
+        async function applyBestModel() {
+            if (!bestModelId) return;
+            
+            await switchModel(bestModelId);
+            document.getElementById('modelSelector').value = bestModelId;
+            closeBenchmarkModal();
+        }
+        
+        function exportBenchmarkResults() {
+            const csv = 'Model,Avg Processing Time (ms),Success Rate,Confidence\n' +
+                Object.entries(benchmarkResults).map(([modelId, result]) => {
+                    const model = availableModels.find(m => m.id === modelId);
+                    return `${model?.name || modelId},${result.avgProcessingTime.toFixed(2)},${result.successRate.toFixed(3)},${result.avgConfidence.toFixed(3)}`;
+                }).join('\n');
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `benchmark-results-${new Date().toISOString()}.csv`;
+            a.click();
+        }
+        
+        // Compare Functions
+        function populateCompareSelects() {
+            const selects = ['compareModel1', 'compareModel2'];
+            selects.forEach(selectId => {
+                const select = document.getElementById(selectId);
+                select.innerHTML = '<option value="">Select model...</option>';
+                
+                availableModels.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id;
+                    option.textContent = model.name;
+                    select.appendChild(option);
+                });
+            });
+        }
+        
+        async function compareModels() {
+            const model1 = document.getElementById('compareModel1').value;
+            const model2 = document.getElementById('compareModel2').value;
+            
+            if (!model1 || !model2) {
+                alert('Please select two models to compare');
+                return;
+            }
+            
+            if (model1 === model2) {
+                alert('Please select different models');
+                return;
+            }
+            
+            try {
+                // Capture test frame
+                const response = await fetch('http://localhost:3001/snapshot.jpg');
+                if (!response.ok) throw new Error('Failed to capture test frame');
+                
+                const blob = await response.blob();
+                const reader = new FileReader();
+                const testFrame = await new Promise((resolve, reject) => {
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                
+                // Compare models
+                const compareResponse = await fetch('http://localhost:3001/models/compare', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model1, model2, testFrame })
+                });
+                
+                if (!compareResponse.ok) throw new Error('Comparison failed');
+                
+                const comparison = await compareResponse.json();
+                displayComparisonResults(comparison);
+                
+            } catch (error) {
+                console.error('Comparison error:', error);
+                document.getElementById('compareResults').innerHTML =
+                    `<div class="status error">Comparison failed: ${error.message}</div>`;
+            }
+        }
+        
+        function displayComparisonResults(comparison) {
+            const container = document.getElementById('compareResults');
+            
+            let html = `<h3>Winner: ${comparison.winner} 🏆</h3>`;
+            html += '<div style="display: grid; gap: 15px; margin-top: 20px;">';
+            
+            Object.entries(comparison.analysis).forEach(([metric, data]) => {
+                const metricName = metric.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                html += `
+                    <div class="model-result">
+                        <h4>${metricName}</h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div class="benchmark-metric">
+                                <div class="benchmark-metric-value">${
+                                    typeof data[Object.keys(comparison.models)[0]] === 'number' ?
+                                    data[Object.keys(comparison.models)[0]].toFixed(2) :
+                                    data[Object.keys(comparison.models)[0]]
+                                }</div>
+                                <div class="benchmark-metric-label">${Object.keys(comparison.models)[0]}</div>
+                            </div>
+                            <div class="benchmark-metric">
+                                <div class="benchmark-metric-value">${
+                                    typeof data[Object.keys(comparison.models)[1]] === 'number' ?
+                                    data[Object.keys(comparison.models)[1]].toFixed(2) :
+                                    data[Object.keys(comparison.models)[1]]
+                                }</div>
+                                <div class="benchmark-metric-label">${Object.keys(comparison.models)[1]}</div>
+                            </div>
+                        </div>
+                        <div style="text-align: center; margin-top: 10px; color: #4af542;">
+                            Winner: ${data.winner} (${data.improvement} better)
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        // Modal Functions
+        function closeBenchmarkModal() {
+            document.getElementById('benchmarkModal').style.display = 'none';
+        }
+        
+        function closeCompareModal() {
+            document.getElementById('compareModal').style.display = 'none';
+        }
+        
         // Add log entry
         function addLogEntry(message, type = 'info') {
             const entry = document.createElement('div');
@@ -670,7 +1191,8 @@
             const settings = {
                 conditions: [],
                 interval: document.getElementById('analysisInterval').value,
-                apiUrl: document.getElementById('smolvlmUrl').value
+                apiUrl: document.getElementById('smolvlmUrl').value,
+                modelId: currentModel?.id
             };
             
             document.querySelectorAll('.condition-item').forEach(item => {
@@ -682,12 +1204,12 @@
                 });
             });
             
-            localStorage.setItem('llava-monitor-settings', JSON.stringify(settings));
+            localStorage.setItem('smolvlm-monitor-settings', JSON.stringify(settings));
         }
         
         // Load settings from localStorage
         function loadSettings() {
-            const saved = localStorage.getItem('llava-monitor-settings');
+            const saved = localStorage.getItem('smolvlm-monitor-settings');
             if (!saved) return;
             
             try {
@@ -701,6 +1223,12 @@
                 // Load interval
                 if (settings.interval) {
                     document.getElementById('analysisInterval').value = settings.interval;
+                }
+                
+                // Load saved model
+                if (settings.modelId && availableModels.some(m => m.id === settings.modelId)) {
+                    document.getElementById('modelSelector').value = settings.modelId;
+                    switchModel(settings.modelId);
                 }
                 
                 // Load conditions
@@ -725,7 +1253,7 @@
         
         // Save alert for redundancy
         function saveAlert(alert) {
-            const alerts = JSON.parse(localStorage.getItem('llava-alerts') || '[]');
+            const alerts = JSON.parse(localStorage.getItem('smolvlm-alerts') || '[]');
             alerts.push(alert);
             
             // Keep only last 100 alerts
@@ -733,7 +1261,7 @@
                 alerts.splice(0, alerts.length - 100);
             }
             
-            localStorage.setItem('llava-alerts', JSON.stringify(alerts));
+            localStorage.setItem('smolvlm-alerts', JSON.stringify(alerts));
         }
         
         // Auto-save settings on change

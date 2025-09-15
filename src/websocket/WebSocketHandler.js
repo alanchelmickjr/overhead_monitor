@@ -145,6 +145,16 @@ class WebSocketHandler {
       this.handleEmergencyStop(socket, data);
     });
     
+    // Force immediate capture
+    socket.on('force_capture', (data) => {
+      this.handleForceCapture(socket, data);
+    });
+    
+    // Get activity status
+    socket.on('get_activity_status', (data) => {
+      this.handleGetActivityStatus(socket, data);
+    });
+    
     // Get status
     socket.on('get_status', (data) => {
       this.handleGetStatus(socket, data);
@@ -672,23 +682,71 @@ class WebSocketHandler {
   broadcastFrame(frameData) {
     const room = `camera:${frameData.cameraId}`;
     
-    this.io.to(room).emit('frame', {
+    const data = {
       cameraId: frameData.cameraId,
       timestamp: frameData.timestamp,
       image: frameData.image,
       format: frameData.format || 'jpeg',
-      analysis: frameData.analysis
-    });
+      analysis: frameData.analysis,
+      processingTime: frameData.processingTime || (Date.now() - new Date(frameData.timestamp).getTime()),
+      stats: {
+        activityLevel: frameData.activityLevel,
+        currentInterval: frameData.currentInterval,
+        eventCounts: frameData.eventCounts
+      }
+    };
+    
+    this.io.to(room).emit('frame', data);
     
     this.stats.broadcastsSent++;
     this.stats.messagesSent += this.io.sockets.adapter.rooms.get(room)?.size || 0;
+    
+    // Update real-time metrics
+    this.updateRealtimeMetrics(frameData);
+  }
+  
+  /**
+   * Update and broadcast real-time performance metrics
+   */
+  updateRealtimeMetrics(frameData) {
+    if (!this.realtimeMetrics) {
+      this.realtimeMetrics = {
+        avgProcessingTime: 0,
+        frameCount: 0,
+        lastUpdate: Date.now()
+      };
+    }
+    
+    const processingTime = Date.now() - new Date(frameData.timestamp).getTime();
+    
+    // Update rolling average
+    this.realtimeMetrics.frameCount++;
+    this.realtimeMetrics.avgProcessingTime =
+      (this.realtimeMetrics.avgProcessingTime * (this.realtimeMetrics.frameCount - 1) + processingTime) /
+      this.realtimeMetrics.frameCount;
+    
+    // Broadcast metrics every second
+    if (Date.now() - this.realtimeMetrics.lastUpdate > 1000) {
+      this.io.to('metrics').emit('realtime_metrics', {
+        type: 'realtime_metrics',
+        metrics: {
+          avgProcessingTime: Math.round(this.realtimeMetrics.avgProcessingTime),
+          framesPerSecond: this.realtimeMetrics.frameCount,
+          timestamp: new Date().toISOString()
+        }
+      });
+      
+      // Reset for next second
+      this.realtimeMetrics.frameCount = 0;
+      this.realtimeMetrics.lastUpdate = Date.now();
+    }
   }
 
   /**
    * Broadcast event to subscribers
    */
   broadcastEvent(event) {
-    this.io.to('events').emit('event_detected', {
+    const data = {
       id: event.id,
       type: event.type,
       timestamp: event.timestamp,
@@ -697,11 +755,41 @@ class WebSocketHandler {
       zoneId: event.zoneId,
       confidence: event.confidence,
       priority: event.priority,
-      description: event.description
-    });
+      description: event.description,
+      displayTitle: event.metadata?.occurrenceCount > 1
+        ? `${event.type.replace(/_/g, ' ')} (×${event.metadata.occurrenceCount})`
+        : event.type.replace(/_/g, ' '),
+      responseTime: Date.now() - new Date(event.timestamp).getTime(),
+      occurrenceCount: event.metadata?.occurrenceCount || 1,
+      activityLevel: this.services.eventDetector?.getActivityLevel() || 'normal'
+    };
+    
+    this.io.to('events').emit('event_detected', data);
     
     this.stats.broadcastsSent++;
     this.stats.messagesSent += this.io.sockets.adapter.rooms.get('events')?.size || 0;
+    
+    // For critical events, send immediate notification
+    if (event.priority === 'critical' || event.type === 'human_in_area') {
+      this.broadcastCriticalEvent(event);
+    }
+  }
+  
+  /**
+   * Broadcast critical events with highest priority
+   */
+  broadcastCriticalEvent(event) {
+    const criticalData = {
+      type: 'critical_event',
+      event: event,
+      timestamp: new Date().toISOString(),
+      requiresImmediateAction: true
+    };
+    
+    // Send to all connected clients immediately
+    this.io.emit('critical_alert', criticalData);
+    
+    logger.warn(`CRITICAL EVENT broadcasted: ${event.type}`);
   }
 
   /**
@@ -717,19 +805,26 @@ class WebSocketHandler {
       title: alert.title,
       message: alert.message,
       timestamp: alert.metadata.timestamp,
-      state: alert.state
+      state: alert.state,
+      displayTitle: alert.displayTitle || alert.title,
+      badge: alert.occurrenceCount > 1 ? alert.occurrenceCount : null,
+      occurrenceCount: alert.occurrenceCount,
+      firstOccurrence: alert.firstOccurrence
     });
     
     // Also send to dashboard for immediate display
     this.io.to('dashboard').emit('alert_notification', {
       id: alert.id,
       priority: alert.priority,
-      title: alert.title,
-      message: alert.message
+      title: alert.displayTitle || alert.title,
+      message: alert.message,
+      occurrenceCount: alert.occurrenceCount,
+      firstOccurrence: alert.firstOccurrence,
+      timestamp: alert.metadata.timestamp
     });
     
     this.stats.broadcastsSent++;
-    this.stats.messagesSent += 
+    this.stats.messagesSent +=
       (this.io.sockets.adapter.rooms.get('alerts')?.size || 0) +
       (this.io.sockets.adapter.rooms.get('dashboard')?.size || 0);
   }
@@ -770,6 +865,82 @@ class WebSocketHandler {
       rooms: Array.from(this.io.sockets.adapter.rooms.keys()),
       clientCount: this.clients.size
     };
+  }
+  
+  /**
+   * Handle force capture request
+   */
+  async handleForceCapture(socket, data) {
+    const { cameraId, reason } = data;
+    
+    try {
+      logger.info(`Force capture requested for ${cameraId}: ${reason}`);
+      
+      if (!this.services.cameraManager) {
+        throw new Error('Camera manager not available');
+      }
+      
+      await this.services.cameraManager.triggerImmediateCapture(cameraId);
+      
+      socket.emit('force_capture_complete', {
+        cameraId,
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      socket.emit('error', {
+        message: 'Failed to force capture',
+        error: error.message
+      });
+    }
+    
+    this.stats.messagesReceived++;
+  }
+  
+  /**
+   * Handle get activity status request
+   */
+  async handleGetActivityStatus(socket, data) {
+    try {
+      const cameras = this.services.cameraManager?.getAllCameras() || [];
+      const status = cameras.map(camera => ({
+        cameraId: camera.id,
+        throttlingInfo: this.services.cameraManager?.getThrottlingInfo(camera.id),
+        activityLevel: this.services.eventDetector?.getActivityLevel() || 'normal',
+        eventCounts: this.services.eventDetector?.getEventCounts() || {}
+      }));
+      
+      socket.emit('activity_status', {
+        status,
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      socket.emit('error', {
+        message: 'Failed to get activity status',
+        error: error.message
+      });
+    }
+    
+    this.stats.messagesReceived++;
+  }
+  
+  /**
+   * Broadcast message to specific room
+   */
+  broadcastToRoom(room, data) {
+    this.io.to(room).emit(data.type || 'message', data);
+    this.stats.broadcastsSent++;
+    this.stats.messagesSent += this.io.sockets.adapter.rooms.get(room)?.size || 0;
+  }
+  
+  /**
+   * Broadcast to all clients
+   */
+  broadcast(data) {
+    this.io.emit(data.type || 'message', data);
+    this.stats.broadcastsSent++;
+    this.stats.messagesSent += this.clients.size;
   }
 }
 

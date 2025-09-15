@@ -263,8 +263,13 @@ if [ -f "rtsp-proxy.js" ]; then
     RTSP_PID=$!
 fi
 
-# Start robot monitor
-if [ -f "robot-monitor-server.js" ]; then
+# Start robot monitor - use enhanced version with multi-model support
+if [ -f "robot-monitor-server-enhanced.js" ]; then
+    log_info "Starting enhanced robot monitor with multi-model support..."
+    node robot-monitor-server-enhanced.js &
+    ROBOT_PID=$!
+elif [ -f "robot-monitor-server.js" ]; then
+    log_info "Starting standard robot monitor..."
     node robot-monitor-server.js &
     ROBOT_PID=$!
 fi
@@ -299,9 +304,14 @@ echo "========================================"
 echo ""
 echo -e "${GREEN}📱 Access Points:${NC}"
 echo "   • Camera viewer: http://localhost:3000"
-echo "   • RTSP proxy: http://localhost:3001"
+echo "   • RTSP proxy/Robot Monitor: http://localhost:3001"
 echo "   • LLaVA test: http://localhost:3000"
 echo "   • LLaVA API: http://localhost:8080/v1/chat/completions"
+echo ""
+echo -e "${GREEN}✨ Multi-Model Features:${NC}"
+echo "   • Model switching: Use dropdown in header"
+echo "   • Benchmark models: Click ⚡ button"
+echo "   • Compare models: Click 📊 button"
 echo ""
 echo -e "${YELLOW}💡 Tip: Open http://localhost:3000 in Safari for best performance${NC}"
 echo -e "${YELLOW}🛑 Press Ctrl+C to stop all services${NC}"

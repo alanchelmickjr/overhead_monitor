@@ -20,7 +20,10 @@ const EVENT_TYPES = {
   TASK_COMPLETED: 'task_completed',
   ZONE_VIOLATION: 'zone_violation',
   PERFORMANCE_ANOMALY: 'performance_anomaly',
-  SAFETY_CONCERN: 'safety_concern'
+  SAFETY_CONCERN: 'safety_concern',
+  HUMAN_IN_AREA: 'human_in_area',
+  HIGH_ACTIVITY: 'high_activity',
+  LOW_ACTIVITY: 'low_activity'
 };
 
 // Event priorities
@@ -44,7 +47,10 @@ class EventDetector extends EventEmitter {
       task_completed: 0.70,
       zone_violation: 0.75,
       performance_anomaly: 0.65,
-      safety_concern: 0.90
+      safety_concern: 0.90,
+      human_in_area: 0.80,
+      high_activity: 0.70,
+      low_activity: 0.70
     };
     
     this.confirmationFrames = config.confirmation_frames || {
@@ -54,7 +60,10 @@ class EventDetector extends EventEmitter {
       task_completed: 1,
       zone_violation: 2,
       performance_anomaly: 4,
-      safety_concern: 1
+      safety_concern: 1,
+      human_in_area: 1,
+      high_activity: 1,
+      low_activity: 3
     };
     
     // State tracking
@@ -62,6 +71,9 @@ class EventDetector extends EventEmitter {
     this.pendingEvents = new Map();
     this.confirmedEvents = new Map();
     this.eventHistory = [];
+    this.recentEventCounts = new Map(); // For deduplication
+    this.activityLevel = 'normal';
+    this.lastActivityCheck = Date.now();
     
     // Zone definitions
     this.zones = config.zones || [];
@@ -89,10 +101,19 @@ class EventDetector extends EventEmitter {
     // Extract detections from analysis
     const detections = analysis.detections || [];
     
+    // Check activity level
+    const activityEvent = this.checkActivityLevel(detections, analysis);
+    if (activityEvent) {
+      events.push(activityEvent);
+    }
+    
     for (const detection of detections) {
       const event = await this.evaluateDetection(detection, analysis, frameData);
       if (event) {
-        events.push(event);
+        // Check for duplicate events
+        if (!this.isDuplicateEvent(event)) {
+          events.push(event);
+        }
       }
     }
     
@@ -410,7 +431,10 @@ class EventDetector extends EventEmitter {
       'collision': EVENT_TYPES.COLLISION_DETECTED,
       'robot_stuck': EVENT_TYPES.ROBOT_STUCK,
       'task_completed': EVENT_TYPES.TASK_COMPLETED,
-      'safety': EVENT_TYPES.SAFETY_CONCERN
+      'safety': EVENT_TYPES.SAFETY_CONCERN,
+      'human_in_area': EVENT_TYPES.HUMAN_IN_AREA,
+      'high_activity': EVENT_TYPES.HIGH_ACTIVITY,
+      'low_activity': EVENT_TYPES.LOW_ACTIVITY
     };
     
     return mapping[detectionType] || detectionType;
@@ -599,7 +623,132 @@ class EventDetector extends EventEmitter {
   clearHistory() {
     this.eventHistory = [];
     this.confirmedEvents.clear();
+    this.recentEventCounts.clear();
     logger.info('Event history cleared');
+  }
+  
+  /**
+   * Check for duplicate events (deduplication)
+   */
+  isDuplicateEvent(event) {
+    const key = `${event.type}-${event.robotId || 'all'}-${event.zoneId || 'none'}`;
+    const now = Date.now();
+    
+    // Get recent events of this type
+    const recentCount = this.recentEventCounts.get(key) || { count: 0, lastSeen: 0, firstSeen: 0 };
+    
+    // If it's been more than 30 seconds, reset the count
+    if (now - recentCount.lastSeen > 30000) {
+      recentCount.count = 0;
+      recentCount.firstSeen = now;
+    }
+    
+    // Increment count
+    recentCount.count++;
+    recentCount.lastSeen = now;
+    
+    // Store updated count
+    this.recentEventCounts.set(key, recentCount);
+    
+    // Add count to event metadata
+    event.metadata = event.metadata || {};
+    event.metadata.occurrenceCount = recentCount.count;
+    event.metadata.firstOccurrence = recentCount.firstSeen;
+    
+    // Only report every 5th occurrence after the first
+    if (recentCount.count > 1 && recentCount.count % 5 !== 0) {
+      return true; // It's a duplicate, skip it
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Check activity level and generate events
+   */
+  checkActivityLevel(detections, analysis) {
+    const now = Date.now();
+    
+    // Only check every 5 seconds
+    if (now - this.lastActivityCheck < 5000) {
+      return null;
+    }
+    
+    this.lastActivityCheck = now;
+    
+    // Count active detections
+    const activeDetections = detections.filter(d =>
+      d.type === 'robot_stuck' ||
+      d.type === 'robot_tipped' ||
+      d.type === 'collision' ||
+      d.type === 'human_in_area'
+    ).length;
+    
+    // Determine activity level
+    let newActivityLevel = 'normal';
+    if (activeDetections >= 3 || detections.some(d => d.type === 'human_in_area')) {
+      newActivityLevel = 'high';
+    } else if (activeDetections === 0 && detections.length < 2) {
+      newActivityLevel = 'low';
+    }
+    
+    // Generate event if activity level changed
+    if (newActivityLevel !== this.activityLevel) {
+      const previousLevel = this.activityLevel;
+      this.activityLevel = newActivityLevel;
+      
+      if (newActivityLevel === 'high') {
+        return {
+          id: uuidv4(),
+          type: EVENT_TYPES.HIGH_ACTIVITY,
+          timestamp: new Date().toISOString(),
+          priority: EVENT_PRIORITIES.HIGH,
+          description: `Activity level increased from ${previousLevel} to HIGH`,
+          metadata: {
+            previousLevel,
+            newLevel: newActivityLevel,
+            activeDetections,
+            trigger: 'activity_monitor'
+          }
+        };
+      } else if (previousLevel === 'high' && newActivityLevel === 'normal') {
+        return {
+          id: uuidv4(),
+          type: EVENT_TYPES.LOW_ACTIVITY,
+          timestamp: new Date().toISOString(),
+          priority: EVENT_PRIORITIES.INFO,
+          description: `Activity level decreased to normal`,
+          metadata: {
+            previousLevel,
+            newLevel: newActivityLevel,
+            activeDetections,
+            trigger: 'activity_monitor'
+          }
+        };
+      }
+    }
+    
+    return null;
+  }
+  
+  /**
+   * Get current activity level
+   */
+  getActivityLevel() {
+    return this.activityLevel;
+  }
+  
+  /**
+   * Get event counts for deduplication display
+   */
+  getEventCounts() {
+    const counts = {};
+    for (const [key, data] of this.recentEventCounts) {
+      if (Date.now() - data.lastSeen < 30000) { // Only show recent counts
+        counts[key] = data.count;
+      }
+    }
+    return counts;
   }
 }
 

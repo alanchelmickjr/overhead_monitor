@@ -145,12 +145,35 @@ async function initializeServices() {
 }
 
 function setupServiceConnections() {
-  // Connect event detector to alert manager
+  // Connect event detector to alert manager and camera throttling
   eventDetector.on('event', (event) => {
     logger.info(`Event detected: ${event.type}`, event);
     alertManager.handleEvent(event);
     database.saveEvent(event);
     wsHandler.broadcastEvent(event);
+    
+    // Update camera throttling based on activity
+    if (event.cameraId) {
+      const hasActivity = ['robot_tipped', 'robot_stuck', 'collision_detected', 'human_in_area'].includes(event.type);
+      const eventTypes = [event.type];
+      
+      // Critical events trigger immediate capture
+      if (event.type === 'human_in_area' || event.type === 'robot_tipped') {
+        cameraManager.triggerImmediateCapture(event.cameraId);
+      }
+      
+      // Update throttling
+      cameraManager.updateActivityThrottle(event.cameraId, hasActivity, eventTypes);
+    }
+    
+    // Update global activity level for all cameras on high/low activity events
+    if (event.type === 'high_activity' || event.type === 'low_activity') {
+      const allCameras = cameraManager.getAllCameras();
+      allCameras.forEach(camera => {
+        const hasActivity = event.type === 'high_activity';
+        cameraManager.updateActivityThrottle(camera.id, hasActivity, []);
+      });
+    }
   });
   
   // Connect alert manager to WebSocket
@@ -162,13 +185,31 @@ function setupServiceConnections() {
   // Camera frame processing pipeline
   cameraManager.on('frame', async (frameData) => {
     try {
-      const analysis = await visionEngine.analyzeFrame(frameData);
+      // Skip analysis if in resource saving mode and no recent activity
+      const throttleInfo = cameraManager.getThrottlingInfo(frameData.cameraId);
+      if (throttleInfo && throttleInfo.resourceSaving && throttleInfo.timeSinceActivity > 30000) {
+        // Quick check only - use simpler prompts
+        const quickAnalysis = await visionEngine.analyzeFrame(frameData, 'activity_level');
+        if (quickAnalysis.content && quickAnalysis.content.includes('LOW')) {
+          // Still quiet, skip full analysis
+          return;
+        }
+      }
+      
+      // Full analysis
+      const analysis = await visionEngine.analyzeMultiple(frameData, ['general', 'human_detection', 'robot_tipped']);
       const events = await eventDetector.processAnalysis(analysis, frameData);
       
-      // Broadcast frame and analysis
+      // Get activity level
+      const activityLevel = eventDetector.getActivityLevel();
+      
+      // Broadcast frame with analysis and stats
       wsHandler.broadcastFrame({
         ...frameData,
-        analysis: analysis.summary
+        analysis: analysis.summary,
+        activityLevel: activityLevel,
+        currentInterval: throttleInfo?.currentInterval,
+        eventCounts: eventDetector.getEventCounts()
       });
       
     } catch (error) {
@@ -184,7 +225,10 @@ async function startMonitoring() {
   for (const camera of configManager.get('cameras')) {
     try {
       await cameraManager.startStream(camera.id, {
-        interval: monitoringConfig.captureInterval || 500
+        interval: monitoringConfig.captureInterval || 500,
+        minInterval: monitoringConfig.minCaptureInterval || 50,
+        maxInterval: monitoringConfig.maxCaptureInterval || 10000,
+        activityTimeout: monitoringConfig.activityTimeout || 10000
       });
       logger.info(`Started monitoring camera: ${camera.id}`);
     } catch (error) {

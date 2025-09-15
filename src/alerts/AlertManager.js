@@ -198,6 +198,8 @@ class AlertManager extends EventEmitter {
       title: this.formatTitle(rule.title || event.type, event),
       message: this.formatMessage(rule.message || event.description, event),
       channels: rule.channels || this.defaultChannels,
+      occurrenceCount: event.metadata?.occurrenceCount || 1,
+      firstOccurrence: event.metadata?.firstOccurrence || Date.now(),
       recipients: rule.recipients || [],
       metadata: {
         event: event,
@@ -224,6 +226,8 @@ class AlertManager extends EventEmitter {
       title: `${event.type.replace(/_/g, ' ').toUpperCase()} Detected`,
       message: event.description,
       channels: this.defaultChannels,
+      occurrenceCount: event.metadata?.occurrenceCount || 1,
+      firstOccurrence: event.metadata?.firstOccurrence || Date.now(),
       recipients: [],
       metadata: {
         event: event,
@@ -334,8 +338,16 @@ class AlertManager extends EventEmitter {
   
   async sendToDashboard(alert) {
     // Dashboard alerts are handled via WebSocket
-    // This will be implemented in WebSocketHandler
-    logger.info(`Dashboard alert: ${alert.title}`);
+    // Add occurrence count to title if > 1
+    const displayTitle = alert.occurrenceCount > 1
+      ? `${alert.title} (×${alert.occurrenceCount})`
+      : alert.title;
+    
+    logger.info(`Dashboard alert: ${displayTitle}`);
+    
+    // Store formatted title for WebSocket broadcast
+    alert.displayTitle = displayTitle;
+    
     return { success: true };
   }
   
@@ -352,7 +364,9 @@ class AlertManager extends EventEmitter {
     const mailOptions = {
       from: this.channels.email.from || 'robot-monitor@example.com',
       to: recipients.join(','),
-      subject: `[${alert.priority.toUpperCase()}] ${alert.title}`,
+      subject: alert.occurrenceCount > 1
+        ? `[${alert.priority.toUpperCase()}] ${alert.title} (×${alert.occurrenceCount})`
+        : `[${alert.priority.toUpperCase()}] ${alert.title}`,
       html: this.generateEmailHTML(alert),
       text: this.generateEmailText(alert)
     };
@@ -569,7 +583,8 @@ class AlertManager extends EventEmitter {
     if (!window) {
       window = {
         startTime: now,
-        count: 0
+        count: 0,
+        totalOccurrences: 0
       };
       this.throttleWindows.set(key, window);
     }
@@ -578,6 +593,16 @@ class AlertManager extends EventEmitter {
     if (now - window.startTime > this.throttleConfig.window) {
       window.startTime = now;
       window.count = 0;
+      // Don't reset totalOccurrences - keep cumulative count
+    }
+    
+    // Track total occurrences
+    window.totalOccurrences += alert.occurrenceCount || 1;
+    
+    // For repeated events (occurrenceCount > 1), be more lenient
+    if (alert.occurrenceCount > 1 && alert.occurrenceCount % 10 !== 0) {
+      // Only send every 10th occurrence after the first
+      return true;
     }
     
     // Check if throttled
@@ -610,21 +635,27 @@ class AlertManager extends EventEmitter {
   }
   
   generateEmailHTML(alert) {
+    const occurrenceInfo = alert.occurrenceCount > 1
+      ? `<p><strong>Occurrences:</strong> ${alert.occurrenceCount} times since ${new Date(alert.firstOccurrence).toLocaleTimeString()}</p>`
+      : '';
+      
     return `
       <html>
         <body style="font-family: Arial, sans-serif;">
           <h2 style="color: ${this.getPriorityColor(alert.priority)};">
             ${alert.title}
+            ${alert.occurrenceCount > 1 ? `<span style="background: #ff6b6b; color: white; padding: 2px 8px; border-radius: 12px; font-size: 14px; margin-left: 10px;">×${alert.occurrenceCount}</span>` : ''}
           </h2>
           <p>${alert.message}</p>
           <hr>
           <p><strong>Event Type:</strong> ${alert.eventType}</p>
           <p><strong>Priority:</strong> ${alert.priority}</p>
           <p><strong>Time:</strong> ${alert.metadata.timestamp}</p>
+          ${occurrenceInfo}
           <p><strong>Camera:</strong> ${alert.metadata.event.cameraId}</p>
-          ${alert.metadata.event.robotId ? 
+          ${alert.metadata.event.robotId ?
             `<p><strong>Robot:</strong> ${alert.metadata.event.robotId}</p>` : ''}
-          ${alert.metadata.event.zoneId ? 
+          ${alert.metadata.event.zoneId ?
             `<p><strong>Zone:</strong> ${alert.metadata.event.zoneId}</p>` : ''}
           <p><strong>Confidence:</strong> ${(alert.metadata.event.confidence * 100).toFixed(0)}%</p>
           <hr>
@@ -638,14 +669,18 @@ class AlertManager extends EventEmitter {
   }
   
   generateEmailText(alert) {
+    const occurrenceInfo = alert.occurrenceCount > 1
+      ? `\nOccurrences: ${alert.occurrenceCount} times since ${new Date(alert.firstOccurrence).toLocaleTimeString()}`
+      : '';
+      
     return `
-${alert.title}
+${alert.title}${alert.occurrenceCount > 1 ? ` (×${alert.occurrenceCount})` : ''}
 
 ${alert.message}
 
 Event Type: ${alert.eventType}
 Priority: ${alert.priority}
-Time: ${alert.metadata.timestamp}
+Time: ${alert.metadata.timestamp}${occurrenceInfo}
 Camera: ${alert.metadata.event.cameraId}
 ${alert.metadata.event.robotId ? `Robot: ${alert.metadata.event.robotId}` : ''}
 ${alert.metadata.event.zoneId ? `Zone: ${alert.metadata.event.zoneId}` : ''}

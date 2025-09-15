@@ -301,10 +301,10 @@ app.get('/snapshot.jpg', async (req, res) => {
     }
 });
 
-// LLaVA proxy endpoint to avoid CORS
+// SmolVLM proxy endpoint to avoid CORS
 app.use(express.json({ limit: '10mb' }));
 app.post('/analyze', async (req, res) => {
-    log('🧠 LLaVA analysis requested', 'INFO');
+    log('🧠 SmolVLM analysis requested', 'INFO');
     
     const { image, prompt, apiUrl } = req.body;
     const url = apiUrl || 'http://localhost:8080/v1/chat/completions';
@@ -314,7 +314,7 @@ app.post('/analyze', async (req, res) => {
         const axios = require('axios');
         
         const response = await axios.post(url, {
-            model: 'llava-v1.5-7b-q4-k-m',
+            model: 'smolvlm-instruct',
             messages: [{
                 role: 'user',
                 content: [
@@ -332,15 +332,15 @@ app.post('/analyze', async (req, res) => {
         });
         
         res.json(response.data);
-        log('✅ LLaVA analysis completed', 'SUCCESS');
+        log('✅ SmolVLM analysis completed', 'SUCCESS');
         
     } catch (error) {
         const errorDetails = error.response?.data || error.message || 'Unknown error';
-        log(`❌ LLaVA error: ${JSON.stringify(errorDetails)}`, 'ERROR');
+        log(`❌ SmolVLM error: ${JSON.stringify(errorDetails)}`, 'ERROR');
         
         // Check if it's a connection error
         if (error.code === 'ECONNREFUSED') {
-            log('LLaVA server not running on ' + url, 'ERROR');
+            log('SmolVLM server not running on ' + url, 'ERROR');
         }
         
         res.status(500).json({

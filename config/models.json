@@ -1,0 +1,177 @@
+{
+  "models": {
+    "smolvlm-500m": {
+      "id": "smolvlm-500m",
+      "name": "SmolVLM 500M",
+      "description": "Fast, lightweight model for quick detection",
+      "type": "gguf",
+      "size": "500M",
+      "performance": {
+        "speed": "fast",
+        "accuracy": "good",
+        "memory": "low"
+      },
+      "hardware": ["m4", "xavier", "cpu"],
+      "recommended_for": ["real-time", "edge-devices"],
+      "endpoints": {
+        "gguf": {
+          "model": "SmolVLM-500M-Instruct-Q8_0.gguf",
+          "mmproj": "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
+        },
+        "api": {
+          "model": "smolvlm-instruct"
+        }
+      },
+      "parameters": {
+        "max_tokens": 150,
+        "temperature": 0.7,
+        "ctx_size": 2048
+      },
+      "prompts": {
+        "style": "concise",
+        "prefix": "Be brief and specific. "
+      }
+    },
+    "llava-7b": {
+      "id": "llava-7b",
+      "name": "LLaVA 1.5 7B",
+      "description": "Balanced model with good accuracy and reasonable speed",
+      "type": "gguf",
+      "size": "7B",
+      "performance": {
+        "speed": "medium",
+        "accuracy": "better",
+        "memory": "medium"
+      },
+      "hardware": ["xavier", "m4-high-mem"],
+      "recommended_for": ["balanced", "production"],
+      "endpoints": {
+        "gguf": {
+          "model": "ggml-model-q4_k.gguf",
+          "mmproj": "mmproj-model-f16.gguf"
+        },
+        "api": {
+          "model": "llava-v1.5-7b"
+        }
+      },
+      "parameters": {
+        "max_tokens": 300,
+        "temperature": 0.7,
+        "ctx_size": 4096
+      },
+      "prompts": {
+        "style": "detailed",
+        "prefix": "Provide detailed analysis. "
+      }
+    },
+    "llava-13b": {
+      "id": "llava-13b",
+      "name": "LLaVA 1.5 13B",
+      "description": "High accuracy model for critical detection tasks",
+      "type": "gguf",
+      "size": "13B",
+      "performance": {
+        "speed": "slow",
+        "accuracy": "best",
+        "memory": "high"
+      },
+      "hardware": ["xavier-high-mem"],
+      "recommended_for": ["high-accuracy", "training-data"],
+      "endpoints": {
+        "gguf": {
+          "model": "llava-v1.5-13b-Q4_K.gguf",
+          "mmproj": "llava-v1.5-13b-mmproj-f16.gguf"
+        },
+        "api": {
+          "model": "llava-v1.5-13b"
+        }
+      },
+      "parameters": {
+        "max_tokens": 500,
+        "temperature": 0.8,
+        "ctx_size": 8192
+      },
+      "prompts": {
+        "style": "comprehensive",
+        "prefix": "Provide comprehensive and detailed analysis. "
+      }
+    },
+    "custom-robot": {
+      "id": "custom-robot",
+      "name": "Custom Robot Detector",
+      "description": "Fine-tuned model specifically for robot detection",
+      "type": "custom",
+      "size": "varies",
+      "performance": {
+        "speed": "medium",
+        "accuracy": "specialized",
+        "memory": "medium"
+      },
+      "hardware": ["m4", "xavier"],
+      "recommended_for": ["robot-specific", "production"],
+      "endpoints": {
+        "gguf": {
+          "model": "custom-robot-detector.gguf",
+          "mmproj": "custom-robot-mmproj.gguf"
+        },
+        "api": {
+          "model": "custom-robot-detector"
+        }
+      },
+      "parameters": {
+        "max_tokens": 200,
+        "temperature": 0.5,
+        "ctx_size": 4096
+      },
+      "prompts": {
+        "style": "robot-focused",
+        "prefix": "Focus on robot detection only. "
+      }
+    }
+  },
+  "hardware_profiles": {
+    "m4": {
+      "name": "Apple M4 Mac",
+      "gpu_layers": 32,
+      "threads": 8,
+      "batch_size": 512,
+      "ctx_size": 4096,
+      "use_metal": true,
+      "recommended_models": ["smolvlm-500m", "llava-7b"],
+      "optimizations": {
+        "metal_acceleration": true,
+        "unified_memory": true,
+        "memory_mapped": true
+      }
+    },
+    "xavier": {
+      "name": "NVIDIA AGX Xavier",
+      "gpu_layers": 99,
+      "threads": 8,
+      "batch_size": 1024,
+      "ctx_size": 8192,
+      "use_cuda": true,
+      "recommended_models": ["llava-7b", "llava-13b"],
+      "optimizations": {
+        "tensorrt": true,
+        "cuda_graphs": true,
+        "fp16": true,
+        "int8_quantization": true
+      }
+    },
+    "cpu": {
+      "name": "CPU Only",
+      "gpu_layers": 0,
+      "threads": 4,
+      "batch_size": 256,
+      "ctx_size": 2048,
+      "use_metal": false,
+      "use_cuda": false,
+      "recommended_models": ["smolvlm-500m"],
+      "optimizations": {
+        "avx2": true,
+        "memory_efficient": true
+      }
+    }
+  }
+}

@@ -197,24 +197,175 @@ class CameraManager extends EventEmitter {
       throw new Error(`Camera ${cameraId} not found`);
     }
 
-    const interval = options.interval || 500;
+    // Initialize intelligent throttling settings
+    camera.throttling = {
+      baseInterval: options.interval || 500,
+      currentInterval: options.interval || 500,
+      minInterval: 50,     // Fastest capture rate for critical events
+      maxInterval: 10000,  // Slowest rate to save resources (10 seconds)
+      activityLevel: 'normal',
+      lastActivityTime: Date.now(),
+      consecutiveNoActivity: 0,
+      resourceSaving: true,
+      throttleSteps: [100, 250, 500, 1000, 2000, 5000, 10000] // Gradual throttling
+    };
     
     // Clear existing interval if any
     if (this.captureIntervals.has(cameraId)) {
       clearInterval(this.captureIntervals.get(cameraId));
     }
 
-    // Set up capture interval
-    const captureInterval = setInterval(async () => {
-      try {
-        await this.captureFrame(cameraId);
-      } catch (error) {
-        logger.error(`Frame capture error for ${cameraId}:`, error.message);
-      }
-    }, interval);
+    // Start with intelligent capture scheduling
+    this.scheduleThrottledCapture(cameraId);
+    
+    logger.info(`Started throttled stream for camera ${cameraId} - Base: ${camera.throttling.baseInterval}ms`);
+  }
 
-    this.captureIntervals.set(cameraId, captureInterval);
-    logger.info(`Started stream for camera ${cameraId} with ${interval}ms interval`);
+  /**
+   * Intelligent capture scheduling with resource optimization
+   */
+  scheduleThrottledCapture(cameraId) {
+    const camera = this.cameras.get(cameraId);
+    if (!camera || camera.status !== 'connected') {
+      return;
+    }
+
+    const throttle = camera.throttling;
+    
+    const captureAndReschedule = async () => {
+      try {
+        const startTime = Date.now();
+        await this.captureFrame(cameraId);
+        const captureTime = Date.now() - startTime;
+        
+        // Adjust interval based on capture performance
+        if (captureTime > throttle.currentInterval * 0.8) {
+          // If capture takes too long, increase interval to prevent backlog
+          this.adjustThrottleUp(cameraId);
+        }
+        
+        // Schedule next capture
+        const timeoutId = setTimeout(() => {
+          this.scheduleThrottledCapture(cameraId);
+        }, throttle.currentInterval);
+        
+        this.captureIntervals.set(cameraId, timeoutId);
+        
+      } catch (error) {
+        logger.error(`Capture error for ${cameraId}:`, error.message);
+        // On error, throttle up to reduce load
+        this.adjustThrottleUp(cameraId);
+        
+        const timeoutId = setTimeout(() => {
+          this.scheduleThrottledCapture(cameraId);
+        }, throttle.currentInterval);
+        this.captureIntervals.set(cameraId, timeoutId);
+      }
+    };
+
+    captureAndReschedule();
+  }
+
+  /**
+   * Adjust throttling based on activity detection
+   */
+  updateActivityThrottle(cameraId, hasActivity, eventTypes = []) {
+    const camera = this.cameras.get(cameraId);
+    if (!camera || !camera.throttling) {
+      return;
+    }
+
+    const throttle = camera.throttling;
+    const now = Date.now();
+    
+    // Critical events need immediate response
+    const criticalEvents = ['human_in_area', 'robot_tipped', 'collision_detected'];
+    const hasCritical = eventTypes.some(type => criticalEvents.includes(type));
+    
+    if (hasCritical) {
+      // CRITICAL: Capture as fast as possible
+      throttle.currentInterval = throttle.minInterval;
+      throttle.activityLevel = 'critical';
+      throttle.lastActivityTime = now;
+      throttle.consecutiveNoActivity = 0;
+      logger.warn(`Camera ${cameraId}: CRITICAL event - interval -> ${throttle.minInterval}ms`);
+      
+    } else if (hasActivity) {
+      // Activity detected - speed up gradually
+      throttle.lastActivityTime = now;
+      throttle.consecutiveNoActivity = 0;
+      
+      if (throttle.activityLevel !== 'high') {
+        throttle.activityLevel = 'high';
+        this.adjustThrottleDown(cameraId);
+      }
+      
+    } else {
+      // No activity - gradually slow down to save resources
+      throttle.consecutiveNoActivity++;
+      
+      if (throttle.consecutiveNoActivity > 5) {
+        throttle.activityLevel = 'low';
+        this.adjustThrottleUp(cameraId);
+      }
+    }
+  }
+
+  /**
+   * Gradually decrease capture interval (speed up)
+   */
+  adjustThrottleDown(cameraId) {
+    const camera = this.cameras.get(cameraId);
+    if (!camera || !camera.throttling) return;
+    
+    const throttle = camera.throttling;
+    const currentIndex = throttle.throttleSteps.findIndex(step => step >= throttle.currentInterval);
+    
+    if (currentIndex > 0) {
+      throttle.currentInterval = throttle.throttleSteps[currentIndex - 1];
+      logger.info(`Camera ${cameraId}: Speeding up -> ${throttle.currentInterval}ms (saving resources: false)`);
+    }
+  }
+
+  /**
+   * Gradually increase capture interval (slow down)
+   */
+  adjustThrottleUp(cameraId) {
+    const camera = this.cameras.get(cameraId);
+    if (!camera || !camera.throttling) return;
+    
+    const throttle = camera.throttling;
+    const currentIndex = throttle.throttleSteps.findIndex(step => step >= throttle.currentInterval);
+    
+    if (currentIndex < throttle.throttleSteps.length - 1 && currentIndex !== -1) {
+      throttle.currentInterval = throttle.throttleSteps[currentIndex + 1];
+      const resourceSaving = throttle.currentInterval >= 1000;
+      throttle.resourceSaving = resourceSaving;
+      logger.info(`Camera ${cameraId}: Slowing down -> ${throttle.currentInterval}ms (saving resources: ${resourceSaving})`);
+    }
+  }
+
+  /**
+   * Force immediate capture for critical events
+   */
+  async triggerImmediateCapture(cameraId) {
+    const camera = this.cameras.get(cameraId);
+    if (!camera || camera.status !== 'connected') {
+      return;
+    }
+    
+    try {
+      logger.info(`Camera ${cameraId}: Triggering immediate capture`);
+      await this.captureFrame(cameraId);
+      
+      // Reset to fast capture after critical event
+      if (camera.throttling) {
+        camera.throttling.currentInterval = camera.throttling.minInterval;
+        camera.throttling.activityLevel = 'critical';
+      }
+    } catch (error) {
+      logger.error(`Immediate capture failed for ${cameraId}:`, error.message);
+    }
   }
 
   async captureFrame(cameraId) {
@@ -290,10 +441,17 @@ class CameraManager extends EventEmitter {
   }
 
   async stopStream(cameraId) {
-    // Clear capture interval
+    // Clear capture interval/timeout
     if (this.captureIntervals.has(cameraId)) {
-      clearInterval(this.captureIntervals.get(cameraId));
+      const intervalOrTimeout = this.captureIntervals.get(cameraId);
+      clearTimeout(intervalOrTimeout); // Works for both interval and timeout
       this.captureIntervals.delete(cameraId);
+    }
+
+    // Clear throttling settings
+    const camera = this.cameras.get(cameraId);
+    if (camera) {
+      camera.throttling = null;
     }
 
     // Stop stream if needed
@@ -355,9 +513,40 @@ class CameraManager extends EventEmitter {
   getStatistics() {
     const stats = {};
     for (const [id, camera] of this.cameras) {
-      stats[id] = camera.stats;
+      stats[id] = {
+        ...camera.stats,
+        currentInterval: camera.throttling?.currentInterval || 'N/A',
+        activityLevel: camera.throttling?.activityLevel || 'N/A',
+        resourceSaving: camera.throttling?.resourceSaving || false,
+        consecutiveNoActivity: camera.throttling?.consecutiveNoActivity || 0
+      };
     }
     return stats;
+  }
+
+  /**
+   * Get throttling info for monitoring
+   */
+  getThrottlingInfo(cameraId) {
+    const camera = this.cameras.get(cameraId);
+    if (!camera || !camera.throttling) {
+      return null;
+    }
+    
+    return {
+      currentInterval: camera.throttling.currentInterval,
+      activityLevel: camera.throttling.activityLevel,
+      resourceSaving: camera.throttling.resourceSaving,
+      timeSinceActivity: Date.now() - camera.throttling.lastActivityTime
+    };
+  }
+
+  /**
+   * Check if camera is in resource saving mode
+   */
+  isResourceSaving(cameraId) {
+    const camera = this.cameras.get(cameraId);
+    return camera?.throttling?.resourceSaving || false;
   }
 }
 
