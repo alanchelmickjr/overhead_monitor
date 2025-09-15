@@ -74,8 +74,17 @@ app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Static files (dashboard)
-app.use(express.static(path.join(__dirname, 'public')));
+// Specific routes - must come before static file serving
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'test-camera-stream-llava.html'));
+});
+
+app.get('/settings', (req, res) => {
+  res.sendFile(path.join(__dirname, 'camera-viewer.html'));
+});
+
+// Static files (dashboard) - serve other public assets but not as homepage
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 // API routes (will be configured after services are initialized)
 

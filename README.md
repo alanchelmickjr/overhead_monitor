@@ -101,6 +101,14 @@ For detailed architecture information, see [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Speed Monitoring**: Tracks robot velocity and acceleration patterns
 - **Coordination Metrics**: Multi-robot collaboration effectiveness
 
+### Training Dataset Creation
+- **Ball-in-Cup Tracking**: Specialized mode for creating pick-and-place training datasets
+  - Automatic scoring of successful ball placements
+  - State transition detection (ball in/out of cup)
+  - Human gesture recognition for dataset segmentation
+  - Visual indicators for training operators
+  - See [BALL_IN_CUP_TRACKING_DOCUMENTATION.md](BALL_IN_CUP_TRACKING_DOCUMENTATION.md) for details
+
 For comprehensive monitoring scenarios, see [MONITORING_GUIDE.md](MONITORING_GUIDE.md).
 
 ## Configuration Options
@@ -215,5 +223,9 @@ MIT License - see [LICENSE](LICENSE) file for details
 
 ---
 
-**Current Version**: 1.0.0  
-**Last Updated**: December 2024
+**Current Version**: 1.1.0
+**Last Updated**: September 2025
+
+### Recent Updates
+- **v1.1.0**: Added ball-in-cup event tracking system for training dataset creation
+- **v1.0.0**: Initial release with core monitoring capabilities

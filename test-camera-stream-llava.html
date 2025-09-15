@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>SmolVLM Robot Monitor</title>
+    <title>Ball-in-Cup Training Monitor</title>
     <style>
         body {
             background: #000;
@@ -290,6 +290,80 @@
             margin-top: 5px;
         }
         
+        /* Ball tracking specific styles */
+        .ball-status {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .ball-indicator {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            transition: all 0.3s ease;
+        }
+        
+        .ball-indicator.in-cup {
+            background: #4af542;
+            box-shadow: 0 0 20px rgba(74, 245, 66, 0.5);
+        }
+        
+        .ball-indicator.out-cup {
+            background: #ffaa00;
+            box-shadow: 0 0 20px rgba(255, 170, 0, 0.3);
+        }
+        
+        .score-display {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            border: 2px solid #4a9eff;
+            margin-top: 20px;
+        }
+        
+        .score-display h2 {
+            margin: 0 0 10px 0;
+            color: #4a9eff;
+            font-size: 18px;
+        }
+        
+        .score-value {
+            font-size: 48px;
+            font-weight: bold;
+            color: #4af542;
+            margin: 10px 0;
+        }
+        
+        .ready-indicator {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            margin-top: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .ready-indicator.ready {
+            background: #4af542;
+            color: #000;
+        }
+        
+        .ready-indicator.not-ready {
+            background: #ff4444;
+            color: #fff;
+        }
+        
         .chat-section {
             background: #1a1a1a;
             padding: 20px;
@@ -355,50 +429,104 @@
         }
         
         .inference-entry {
-            margin-bottom: 20px;
-            padding: 12px;
-            background: #1a1a1a;
-            border-radius: 4px;
-            border-left: 3px solid #555;
+            margin-bottom: 15px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            max-width: 85%;
+            position: relative;
         }
         
         .inference-entry.user {
-            border-left-color: #4a9eff;
+            background: #4a9eff;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+            border-bottom-right-radius: 4px;
         }
         
         .inference-entry.ai {
-            border-left-color: #4af542;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            margin-right: auto;
+            text-align: left;
+            border-bottom-left-radius: 4px;
         }
         
         .inference-entry.error {
-            border-left-color: #ff4444;
+            background: #441111;
+            border: 1px solid #ff4444;
+            color: #ff6666;
+            margin-right: auto;
         }
         
         .inference-timestamp {
             color: #888;
-            font-size: 11px;
-            margin-bottom: 5px;
+            font-size: 10px;
+            margin-top: 5px;
+            opacity: 0.7;
+        }
+        
+        .inference-entry.user .inference-timestamp {
+            color: rgba(255, 255, 255, 0.7);
         }
         
         .inference-role {
-            font-weight: bold;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            font-size: 11px;
-            letter-spacing: 0.5px;
-        }
-        
-        .inference-entry.user .inference-role {
-            color: #4a9eff;
-        }
-        
-        .inference-entry.ai .inference-role {
-            color: #4af542;
+            display: none;
         }
         
         .inference-content {
             white-space: pre-wrap;
-            line-height: 1.4;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+        
+        .inference-entry.user .inference-content {
+            font-weight: 500;
+        }
+        
+        .chat-loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 12px;
+            border-bottom-left-radius: 4px;
+            max-width: 85%;
+            margin-bottom: 15px;
+        }
+        
+        .chat-loading-dots {
+            display: flex;
+            gap: 4px;
+        }
+        
+        .chat-loading-dots span {
+            width: 8px;
+            height: 8px;
+            background: #4a9eff;
+            border-radius: 50%;
+            animation: chatDotPulse 1.4s ease-in-out infinite;
+        }
+        
+        .chat-loading-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .chat-loading-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes chatDotPulse {
+            0%, 60%, 100% {
+                opacity: 0.3;
+                transform: scale(0.8);
+            }
+            30% {
+                opacity: 1;
+                transform: scale(1);
+            }
         }
     </style>
 </head>
@@ -406,7 +534,7 @@
     <div class="container">
         <div class="header">
             <div class="header-left">
-                <h1>🤖 SmolVLM Robot Monitor</h1>
+                <h1>🎯 Ball-in-Cup Training Monitor</h1>
                 <div class="model-selector">
                     <label for="modelSelect">Model:</label>
                     <select id="modelSelect">
@@ -415,7 +543,15 @@
                     </select>
                 </div>
             </div>
-            <div id="connectionStatus" class="status">Initializing...</div>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <div id="connectionStatus" class="status">Initializing...</div>
+                <a href="camera-viewer.html" style="color: #4a9eff; font-size: 24px; text-decoration: none; display: flex; align-items: center;" title="Settings">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M12 1v6m0 6v6m11-5h-6m-6 0H1m20.1-6.9L17 7l-4.1-4.1M20.1 17.1L17 17l-4.1 4.1M3.9 17.1L7 17l4.1 4.1M3.9 6.9L7 7l4.1-4.1"></path>
+                    </svg>
+                </a>
+            </div>
         </div>
         
         <div class="main-grid">
@@ -448,19 +584,45 @@
                     </div>
                 </div>
                 
+                <!-- Ball Status Display -->
+                <div class="ball-status">
+                    <div id="ballIndicator" class="ball-indicator out-cup">🔵</div>
+                    <div>
+                        <div style="font-size: 16px; font-weight: bold;">Ball Status: <span id="ballStatusText" style="color: #ffaa00;">OUT OF CUP</span></div>
+                        <div style="font-size: 14px; color: #888; margin-top: 5px;">Last transition: <span id="lastTransition">None</span></div>
+                    </div>
+                </div>
+                
+                <!-- Score Display -->
+                <div class="score-display">
+                    <h2>🏆 Training Score</h2>
+                    <div class="score-value" id="scoreValue">0</div>
+                    <div class="ready-indicator not-ready" id="readyIndicator">Not Ready - Ball not in position</div>
+                    <button onclick="resetScore()" style="margin-top: 15px; background: #ff4444;">Reset Score</button>
+                </div>
+                
                 <!-- Chat Section -->
                 <div class="chat-section">
-                    <h2>💬 Custom Query</h2>
+                    <h2>💬 AI Assistant Chat</h2>
+                    <div class="inference-log" id="inferenceLog">
+                        <div style="color: #666; text-align: center; padding: 40px;">
+                            <div style="font-size: 24px; margin-bottom: 10px;">💬</div>
+                            <div>Ask me about what's happening in the camera view!</div>
+                        </div>
+                    </div>
                     <div class="chat-input-container">
                         <input type="text" id="chatInput" class="chat-input"
                                placeholder="Ask a question about the current camera view..."
-                               onkeypress="if(event.key === 'Enter') sendChatMessage()">
-                        <button id="sendChat" class="send-btn" onclick="sendChatMessage()">Send</button>
-                    </div>
-                    
-                    <h2>📋 Inference Log</h2>
-                    <div class="inference-log" id="inferenceLog">
-                        <div style="color: #666; text-align: center;">No queries yet...</div>
+                               onkeypress="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendChatMessage(); }">
+                        <button id="sendChat" class="send-btn" onclick="sendChatMessage()">
+                            <span style="display: flex; align-items: center; gap: 5px;">
+                                Send
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                </svg>
+                            </span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -470,25 +632,25 @@
                 <h2>Detection Conditions</h2>
                 
                 <div class="condition-list" id="conditionList">
-                    <!-- Default conditions -->
+                    <!-- Ball tracking conditions -->
                     <div class="condition-item">
                         <input type="checkbox" id="cond1" checked>
-                        <label for="cond1">Robot tipped over or fallen</label>
+                        <label for="cond1">Track ball placement in cup</label>
                         <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
                     </div>
                     <div class="condition-item">
                         <input type="checkbox" id="cond2" checked>
-                        <label for="cond2">Robot stuck or not moving</label>
+                        <label for="cond2">Detect human reset gesture (arm up + looking at camera)</label>
                         <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
                     </div>
                     <div class="condition-item">
                         <input type="checkbox" id="cond3">
-                        <label for="cond3">Robots colliding with each other</label>
+                        <label for="cond3">Robot tipped over or fallen</label>
                         <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
                     </div>
                     <div class="condition-item">
                         <input type="checkbox" id="cond4">
-                        <label for="cond4">Ball stuck in cup (scoring event)</label>
+                        <label for="cond4">Robot stuck or not moving</label>
                         <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
                     </div>
                 </div>
@@ -536,6 +698,15 @@
         let stats = {
             frames: 0,
             alerts: 0
+        };
+        
+        // Ball tracking state
+        let ballState = {
+            isInCup: false,
+            lastTransitionTime: null,
+            score: 0,
+            isReady: false,
+            lastKnownState: 'unknown'
         };
         
         // DOM elements
@@ -630,8 +801,8 @@
                     return;
                 }
                 
-                // Build prompt
-                const prompt = `Analyze this robot pen image for the following conditions:\n${conditions.map((c, i) => `${i+1}. ${c}`).join('\n')}\n\nFor each condition, respond with YES or NO followed by a brief explanation. Be specific about what you observe.`;
+                // Build prompt for ball tracking
+                const prompt = buildTrackingPrompt(conditions);
                 
                 // Call SmolVLM API
                 const result = await callSmolVLM(imageData, prompt);
@@ -947,6 +1118,9 @@
                 // Clear input
                 input.value = '';
                 
+                // Show loading indicator
+                showChatLoading();
+                
                 // Capture current frame
                 addLogEntry('Capturing frame for custom query...', 'info');
                 
@@ -968,13 +1142,48 @@
                 // Call AI with custom prompt
                 await callSmolVLM(imageData, message, true);
                 
+                // Remove loading indicator
+                hideChatLoading();
+                
             } catch (error) {
+                hideChatLoading();
                 addLogEntry(`Chat Error: ${error.message}`, 'error');
                 addInferenceEntry(`Error: ${error.message}`, 'error');
             } finally {
                 sendBtn.disabled = false;
                 input.disabled = false;
                 input.focus();
+            }
+        }
+        
+        // Show chat loading indicator
+        function showChatLoading() {
+            const log = document.getElementById('inferenceLog');
+            
+            // Remove any existing loading indicator
+            hideChatLoading();
+            
+            const loading = document.createElement('div');
+            loading.className = 'chat-loading';
+            loading.id = 'chatLoading';
+            loading.innerHTML = `
+                <div class="chat-loading-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <span style="color: #888; font-size: 13px;">AI is thinking...</span>
+            `;
+            
+            log.insertBefore(loading, log.firstChild);
+            log.scrollTop = 0;
+        }
+        
+        // Hide chat loading indicator
+        function hideChatLoading() {
+            const loading = document.getElementById('chatLoading');
+            if (loading) {
+                loading.remove();
             }
         }
         
@@ -990,28 +1199,197 @@
             const entry = document.createElement('div');
             entry.className = `inference-entry ${type}`;
             
-            const timestamp = document.createElement('div');
-            timestamp.className = 'inference-timestamp';
-            timestamp.textContent = new Date().toLocaleString();
-            entry.appendChild(timestamp);
-            
-            const role = document.createElement('div');
-            role.className = 'inference-role';
-            role.textContent = type === 'user' ? 'USER' : type === 'ai' ? 'AI RESPONSE' : 'ERROR';
-            entry.appendChild(role);
-            
+            // Add content first
             const contentDiv = document.createElement('div');
             contentDiv.className = 'inference-content';
             contentDiv.textContent = content;
             entry.appendChild(contentDiv);
             
+            // Add timestamp
+            const timestamp = document.createElement('div');
+            timestamp.className = 'inference-timestamp';
+            timestamp.textContent = new Date().toLocaleTimeString();
+            entry.appendChild(timestamp);
+            
+            // Insert at the beginning (newest on top)
             log.insertBefore(entry, log.firstChild);
+            
+            // Smooth scroll to top
+            log.scrollTo({ top: 0, behavior: 'smooth' });
             
             // Keep only last 50 entries
             while (log.children.length > 50) {
                 log.removeChild(log.lastChild);
             }
+            
+            // Add a subtle animation
+            entry.style.opacity = '0';
+            entry.style.transform = 'translateY(-10px)';
+            setTimeout(() => {
+                entry.style.transition = 'all 0.3s ease';
+                entry.style.opacity = '1';
+                entry.style.transform = 'translateY(0)';
+            }, 10);
         }
+        
+        // Build tracking prompt based on conditions
+        function buildTrackingPrompt(conditions) {
+            let prompt = "Analyze this image and answer the following questions:\n\n";
+            
+            // Check if ball tracking is enabled
+            const ballTrackingEnabled = conditions.some(c => c.includes('ball placement'));
+            const gestureDetectionEnabled = conditions.some(c => c.includes('reset gesture'));
+            
+            if (ballTrackingEnabled) {
+                prompt += "1. Ball Detection: Is there a blue ball visible in the image? If yes, is it currently inside a cup or outside of any cup? Be very specific about the ball's location.\n\n";
+            }
+            
+            if (gestureDetectionEnabled) {
+                prompt += "2. Human Gesture Detection: Is there a person in the frame with one arm raised straight up in the air AND looking directly at the camera? This is a reset signal.\n\n";
+            }
+            
+            // Add other conditions
+            conditions.forEach((condition, index) => {
+                if (!condition.includes('ball placement') && !condition.includes('reset gesture')) {
+                    prompt += `${index + 3}. ${condition}: YES or NO with explanation.\n`;
+                }
+            });
+            
+            prompt += "\nProvide clear, specific answers for each question.";
+            
+            return prompt;
+        }
+        
+        // Process ball tracking result
+        function processBallTrackingResult(result) {
+            const lowerResult = result.toLowerCase();
+            
+            // Detect ball state
+            let currentBallInCup = false;
+            
+            if (lowerResult.includes('ball') && lowerResult.includes('inside') && lowerResult.includes('cup')) {
+                currentBallInCup = true;
+            } else if (lowerResult.includes('ball') && (lowerResult.includes('outside') || lowerResult.includes('not in') || lowerResult.includes('out of'))) {
+                currentBallInCup = false;
+            }
+            
+            // Detect reset gesture
+            const resetGestureDetected = lowerResult.includes('arm') &&
+                                        (lowerResult.includes('raised') || lowerResult.includes('up')) &&
+                                        lowerResult.includes('looking') &&
+                                        lowerResult.includes('camera');
+            
+            // Handle state transitions
+            if (ballState.lastKnownState !== 'unknown') {
+                // Ball enters cup (out → in)
+                if (!ballState.isInCup && currentBallInCup) {
+                    ballState.isInCup = true;
+                    ballState.lastTransitionTime = new Date();
+                    ballState.score++;
+                    ballState.isReady = false;
+                    
+                    updateBallDisplay(true);
+                    addLogEntry(`🎯 SCORE! Ball entered cup. Total score: ${ballState.score}`, 'success');
+                    updateStats();
+                    
+                    // Add to detection panel
+                    addDetection([`✅ Ball successfully placed in cup! Score: ${ballState.score}`]);
+                }
+                // Ball leaves cup (in → out)
+                else if (ballState.isInCup && !currentBallInCup) {
+                    ballState.isInCup = false;
+                    ballState.lastTransitionTime = new Date();
+                    ballState.isReady = true;
+                    
+                    updateBallDisplay(false);
+                    addLogEntry('Ball removed from cup - ready for next placement', 'info');
+                }
+            } else {
+                // Initialize state
+                ballState.isInCup = currentBallInCup;
+                ballState.lastKnownState = currentBallInCup ? 'in' : 'out';
+                ballState.isReady = !currentBallInCup;
+                updateBallDisplay(currentBallInCup);
+            }
+            
+            // Handle reset gesture
+            if (resetGestureDetected) {
+                performReset('gesture');
+            }
+            
+            // Update last known state
+            if (currentBallInCup) {
+                ballState.lastKnownState = 'in';
+            } else {
+                ballState.lastKnownState = 'out';
+            }
+        }
+        
+        // Update ball display
+        function updateBallDisplay(isInCup) {
+            const indicator = document.getElementById('ballIndicator');
+            const statusText = document.getElementById('ballStatusText');
+            const readyIndicator = document.getElementById('readyIndicator');
+            const lastTransition = document.getElementById('lastTransition');
+            
+            if (isInCup) {
+                indicator.className = 'ball-indicator in-cup';
+                indicator.textContent = '✅';
+                statusText.textContent = 'IN CUP';
+                statusText.style.color = '#4af542';
+                readyIndicator.className = 'ready-indicator not-ready';
+                readyIndicator.textContent = 'Scoring Complete - Remove ball to continue';
+            } else {
+                indicator.className = 'ball-indicator out-cup';
+                indicator.textContent = '🔵';
+                statusText.textContent = 'OUT OF CUP';
+                statusText.style.color = '#ffaa00';
+                readyIndicator.className = 'ready-indicator ready';
+                readyIndicator.textContent = 'Ready for placement!';
+            }
+            
+            if (ballState.lastTransitionTime) {
+                lastTransition.textContent = ballState.lastTransitionTime.toLocaleTimeString();
+            }
+            
+            // Update score display
+            document.getElementById('scoreValue').textContent = ballState.score;
+        }
+        
+        // Reset score
+        function resetScore() {
+            if (confirm('Are you sure you want to reset the score?')) {
+                performReset('manual');
+            }
+        }
+        
+        // Perform reset
+        function performReset(type) {
+            ballState.score = 0;
+            ballState.isReady = !ballState.isInCup;
+            
+            updateBallDisplay(ballState.isInCup);
+            
+            const resetMessage = type === 'gesture' ?
+                '🔄 Reset gesture detected! Score reset to 0' :
+                '🔄 Manual reset - Score reset to 0';
+                
+            addLogEntry(resetMessage, 'warning');
+            addDetection([resetMessage]);
+        }
+        
+        // Override the original processAnalysisResult function
+        const originalProcessAnalysisResult = processAnalysisResult;
+        processAnalysisResult = function(result, conditions) {
+            // First, do ball tracking processing
+            const ballTrackingEnabled = conditions.some(c => c.includes('ball placement'));
+            if (ballTrackingEnabled) {
+                processBallTrackingResult(result);
+            }
+            
+            // Then call original processing for other alerts
+            originalProcessAnalysisResult(result, conditions);
+        };
     </script>
 </body>
 </html>
