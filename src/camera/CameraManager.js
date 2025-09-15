@@ -7,6 +7,8 @@ const Stream = require('node-rtsp-stream');
 const axios = require('axios');
 const sharp = require('sharp');
 const winston = require('winston');
+const FrameCaptureService = require('./FrameCaptureService');
+const FrameBufferManager = require('./FrameBufferManager');
 
 const logger = winston.createLogger({
   level: 'info',
@@ -15,17 +17,45 @@ const logger = winston.createLogger({
 });
 
 class CameraManager extends EventEmitter {
-  constructor(cameraConfigs = []) {
+  constructor(cameraConfigs = [], config = {}) {
     super();
     this.cameras = new Map();
     this.streams = new Map();
     this.captureIntervals = new Map();
     this.cameraConfigs = cameraConfigs;
     this.isInitialized = false;
+    
+    // Initialize frame capture service and buffer manager
+    this.frameCaptureService = new FrameCaptureService();
+    this.frameBufferManager = new FrameBufferManager({
+      defaultBufferSize: config.maxMemoryFrames || 100,
+      maxBufferMemory: 100 * 1024 * 1024 // 100MB
+    });
+    
+    // Set up frame capture event handlers
+    this.frameCaptureService.on('frame', (frame) => this.handleCapturedFrame(frame));
+    this.frameCaptureService.on('error', (error) => this.handleCaptureError(error));
+    this.frameCaptureService.on('capture-ended', (info) => this.handleCaptureEnded(info));
+    
+    // Storage service reference (to be injected)
+    this.storageService = null;
+    this.frameStorageEnabled = config.frameStorageEnabled || false;
   }
 
-  async initialize() {
+  async initialize(storageService = null) {
     logger.info('Initializing Camera Manager...');
+    
+    // Set storage service if provided
+    if (storageService) {
+      this.storageService = storageService;
+      logger.info('Storage service configured for frame persistence');
+    }
+    
+    // Check FFmpeg availability
+    const ffmpegAvailable = await FrameCaptureService.checkFFmpegAvailable();
+    if (!ffmpegAvailable) {
+      logger.error('FFmpeg not available - frame capture will not work properly');
+    }
     
     for (const config of this.cameraConfigs) {
       try {
@@ -98,23 +128,27 @@ class CameraManager extends EventEmitter {
   async connectRTSP(camera) {
     const streamUrl = this.buildStreamUrl(camera);
     
-    const stream = new Stream({
-      name: camera.id,
-      streamUrl: streamUrl,
-      wsPort: 9999, // WebSocket port for stream
+    // Initialize frame buffer for this camera
+    this.frameBufferManager.initializeBuffer(camera.id, {
+      bufferSize: camera.bufferSize || 100
+    });
+    
+    // Start frame capture service
+    await this.frameCaptureService.startCapture({
+      cameraId: camera.id,
+      url: streamUrl,
       ffmpegOptions: {
-        '-rtsp_transport': 'tcp',
-        '-r': camera.fps,
-        '-s': `${camera.resolution.width}x${camera.resolution.height}`
+        fps: camera.fps || 30,
+        resolution: `${camera.resolution.width}x${camera.resolution.height}`,
+        quality: 5
+      },
+      metadata: {
+        cameraName: camera.name,
+        protocol: 'rtsp'
       }
     });
-
-    this.streams.set(camera.id, stream);
     
-    // Set up frame capture from RTSP stream
-    stream.on('data', (data) => {
-      this.handleFrameData(camera.id, data);
-    });
+    this.streams.set(camera.id, { type: 'rtsp', capturing: true });
   }
 
   async connectHTTP(camera) {
@@ -132,6 +166,11 @@ class CameraManager extends EventEmitter {
 
     if (testResponse.status === 200) {
       this.streams.set(camera.id, { type: 'http', url: snapshotUrl });
+      
+      // Initialize frame buffer for this camera
+      this.frameBufferManager.initializeBuffer(camera.id, {
+        bufferSize: camera.bufferSize || 50 // Smaller buffer for snapshot cameras
+      });
     } else {
       throw new Error(`HTTP camera test failed with status ${testResponse.status}`);
     }
@@ -380,6 +419,7 @@ class CameraManager extends EventEmitter {
     }
 
     let frameBuffer;
+    let frameData;
     
     if (stream.type === 'http') {
       // Capture snapshot from HTTP camera
@@ -392,11 +432,29 @@ class CameraManager extends EventEmitter {
         timeout: 5000
       });
       frameBuffer = Buffer.from(response.data);
-    } else if (camera.lastFrame) {
-      // Use last captured frame from stream
-      frameBuffer = camera.lastFrame;
+      
+      // Create frame object and add to buffer
+      frameData = {
+        id: `${cameraId}-${Date.now()}`,
+        cameraId: cameraId,
+        timestamp: new Date().toISOString(),
+        data: frameBuffer,
+        metadata: {
+          size: frameBuffer.length,
+          format: 'jpeg',
+          protocol: 'http'
+        }
+      };
+      
+      this.frameBufferManager.addFrame(frameData);
     } else {
-      throw new Error('No frame available');
+      // Get latest frame from buffer for streaming cameras
+      const latestFrame = this.frameBufferManager.getLatestFrame(cameraId);
+      if (!latestFrame) {
+        throw new Error('No frame available in buffer');
+      }
+      frameBuffer = latestFrame.data;
+      frameData = latestFrame;
     }
 
     // Process frame (resize, compress)
@@ -408,11 +466,48 @@ class CameraManager extends EventEmitter {
     // Emit frame event
     this.emit('frame', {
       cameraId: cameraId,
-      timestamp: new Date().toISOString(),
+      timestamp: frameData.timestamp,
       image: processedFrame.toString('base64'),
       format: 'jpeg',
-      resolution: camera.resolution
+      resolution: camera.resolution,
+      frameId: frameData.id
     });
+  }
+
+  /**
+   * Capture snapshot using buffered frames
+   */
+  async captureSnapshot(cameraId) {
+    const camera = this.cameras.get(cameraId);
+    if (!camera || camera.status !== 'connected') {
+      throw new Error(`Camera ${cameraId} not available`);
+    }
+
+    // Get latest frame from buffer
+    const latestFrame = this.frameBufferManager.getLatestFrame(cameraId);
+    if (!latestFrame) {
+      // If no buffered frame, try to capture one
+      await this.captureFrame(cameraId);
+      const newFrame = this.frameBufferManager.getLatestFrame(cameraId);
+      if (!newFrame) {
+        throw new Error('Failed to capture snapshot');
+      }
+      return {
+        cameraId,
+        timestamp: newFrame.timestamp,
+        image: newFrame.data.toString('base64'),
+        format: 'jpeg',
+        frameId: newFrame.id
+      };
+    }
+
+    return {
+      cameraId,
+      timestamp: latestFrame.timestamp,
+      image: latestFrame.data.toString('base64'),
+      format: 'jpeg',
+      frameId: latestFrame.id
+    };
   }
 
   async processFrame(frameBuffer, targetResolution) {
@@ -429,6 +524,75 @@ class CameraManager extends EventEmitter {
     } catch (error) {
       logger.error('Frame processing error:', error);
       return frameBuffer;
+    }
+  }
+
+  /**
+   * Handle captured frame from FrameCaptureService
+   */
+  handleCapturedFrame(frame) {
+    const camera = this.cameras.get(frame.cameraId);
+    if (!camera) return;
+    
+    // Update stats
+    camera.stats.framesProcessed++;
+    
+    // Add frame to buffer
+    this.frameBufferManager.addFrame(frame);
+    
+    // Store frame to disk if enabled
+    if (this.frameStorageEnabled && this.storageService) {
+      this.storeFrameToDisk(frame);
+    }
+    
+    // Update activity throttle based on frame analysis
+    // (This would be updated by event detection results)
+    this.updateActivityThrottle(frame.cameraId, false);
+  }
+
+  /**
+   * Store frame to disk using storage service
+   */
+  async storeFrameToDisk(frame) {
+    if (!this.storageService || !this.storageService.saveFrame) {
+      return;
+    }
+    
+    try {
+      await this.storageService.saveFrame({
+        cameraId: frame.cameraId,
+        timestamp: frame.timestamp,
+        data: frame.data,
+        format: 'jpeg',
+        width: frame.metadata.width || 1280,
+        height: frame.metadata.height || 720,
+        metadata: frame.metadata
+      });
+    } catch (error) {
+      logger.error(`Failed to store frame for camera ${frame.cameraId}:`, error);
+    }
+  }
+
+  /**
+   * Handle capture error from FrameCaptureService
+   */
+  handleCaptureError(error) {
+    logger.error('Frame capture error:', error);
+    this.emit('capture-error', error);
+  }
+
+  /**
+   * Handle capture ended event
+   */
+  handleCaptureEnded(info) {
+    const camera = this.cameras.get(info.cameraId);
+    if (camera) {
+      camera.status = 'disconnected';
+    }
+    
+    // Schedule reconnection if needed
+    if (info.code !== 0) {
+      setTimeout(() => this.reconnectCamera(info.cameraId), 5000);
     }
   }
 
@@ -454,6 +618,12 @@ class CameraManager extends EventEmitter {
       camera.throttling = null;
     }
 
+    // Stop frame capture service
+    await this.frameCaptureService.stopCapture(cameraId);
+    
+    // Clear frame buffer for this camera
+    this.frameBufferManager.clearBuffer(cameraId);
+
     // Stop stream if needed
     const stream = this.streams.get(cameraId);
     if (stream) {
@@ -471,6 +641,13 @@ class CameraManager extends EventEmitter {
     for (const cameraId of cameraIds) {
       await this.stopStream(cameraId);
     }
+    
+    // Stop frame capture service
+    await this.frameCaptureService.stopAll();
+    
+    // Clear all frame buffers
+    this.frameBufferManager.clearAllBuffers();
+    
     logger.info('All camera streams stopped');
   }
 
@@ -547,6 +724,50 @@ class CameraManager extends EventEmitter {
   isResourceSaving(cameraId) {
     const camera = this.cameras.get(cameraId);
     return camera?.throttling?.resourceSaving || false;
+  }
+
+  /**
+   * Get buffered frames for a camera
+   */
+  getBufferedFrames(cameraId, count = 10, newest = true) {
+    return this.frameBufferManager.getFrames(cameraId, count, newest);
+  }
+
+  /**
+   * Subscribe to frame updates
+   */
+  subscribeToFrames(options) {
+    return this.frameBufferManager.subscribe(options);
+  }
+
+  /**
+   * Get frame buffer statistics
+   */
+  getFrameBufferStats(cameraId = null) {
+    if (cameraId) {
+      return this.frameBufferManager.getBufferStats(cameraId);
+    }
+    return this.frameBufferManager.getStatistics();
+  }
+
+  /**
+   * Configure frame storage
+   */
+  configureFrameStorage(enabled, storageService = null) {
+    this.frameStorageEnabled = enabled;
+    if (storageService) {
+      this.storageService = storageService;
+    }
+    logger.info(`Frame storage ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  /**
+   * Clean up resources
+   */
+  async cleanup() {
+    await this.stopAll();
+    this.frameBufferManager.destroy();
+    logger.info('Camera Manager cleaned up');
   }
 }
 

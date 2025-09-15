@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # ========================================
-# Overhead Monitor - ONE BUTTON STARTUP
+# LeKiwi Pen Nanny Cam - ONE BUTTON STARTUP
 # ========================================
 # This script handles EVERYTHING automatically:
 # - Installs llama.cpp if missing
-# - Downloads models if missing  
+# - Downloads models if missing
 # - Installs Node.js dependencies
 # - Starts all services
+# - Configures and starts ngrok tunnels
 
 set -e  # Exit on error
 
@@ -16,9 +17,11 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🚀 Starting Overhead Monitor System...${NC}"
+echo -e "${BLUE}🦜 Starting LeKiwi Pen Nanny Cam System...${NC}"
 echo "========================================"
 
 # Logging functions
@@ -47,6 +50,112 @@ detect_system() {
     else
         log_error "Unsupported operating system: $OSTYPE"
         exit 1
+    fi
+}
+
+# Check and install ngrok
+check_ngrok() {
+    log_info "Checking ngrok installation..."
+    
+    if ! command -v ngrok &> /dev/null; then
+        log_warning "ngrok not found. Installing..."
+        
+        if [[ "$SYSTEM" == "macos" ]]; then
+            if command -v brew &> /dev/null; then
+                brew install ngrok
+            else
+                log_error "Please install Homebrew first or download ngrok from https://ngrok.com"
+                exit 1
+            fi
+        else
+            # Linux installation
+            curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+            echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+            sudo apt update && sudo apt install ngrok
+        fi
+    fi
+    
+    log_success "ngrok is installed: $(ngrok version)"
+    
+    # Check for authtoken
+    if ! ngrok config check &>/dev/null; then
+        log_warning "ngrok authtoken not configured!"
+        echo -e "${CYAN}🚀 Would you like to set up ngrok now for remote access? (y/n)${NC}"
+        read -r setup_response
+        
+        if [[ "$setup_response" =~ ^[Yy]$ ]]; then
+            # Run automated setup
+            if [[ -f "./setup-ngrok.sh" ]]; then
+                echo -e "${BLUE}Starting automated ngrok setup...${NC}"
+                ./setup-ngrok.sh
+                
+                # Check if setup was successful
+                if ngrok config check &>/dev/null; then
+                    log_success "ngrok setup completed!"
+                    SKIP_NGROK=false
+                else
+                    log_warning "ngrok setup was not completed"
+                    SKIP_NGROK=true
+                fi
+            else
+                echo -e "${YELLOW}setup-ngrok.sh not found. Manual setup required:${NC}"
+                echo -e "${YELLOW}1. Run: ngrok config add-authtoken YOUR_TOKEN${NC}"
+                echo -e "${YELLOW}2. Get token from: https://dashboard.ngrok.com/get-started/your-authtoken${NC}"
+                SKIP_NGROK=true
+            fi
+        else
+            echo -e "${YELLOW}Continuing in local mode without remote access.${NC}"
+            SKIP_NGROK=true
+        fi
+    else
+        SKIP_NGROK=false
+    fi
+}
+
+# Start ngrok tunnels
+start_ngrok() {
+    if [[ "$SKIP_NGROK" == "true" ]]; then
+        return 0
+    fi
+    
+    log_info "Starting ngrok tunnels..."
+    
+    # Kill any existing ngrok processes
+    pkill -f "ngrok start" || true
+    sleep 1
+    
+    # Start ngrok with all tunnels
+    ngrok start --all --config ngrok.yml &
+    NGROK_PID=$!
+    
+    # Wait for ngrok to start
+    sleep 3
+    
+    # Get tunnel URLs from ngrok API
+    if command -v curl &> /dev/null; then
+        NGROK_API_RESPONSE=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null || echo "{}")
+        
+        if [[ "$NGROK_API_RESPONSE" != "{}" ]] && [[ "$NGROK_API_RESPONSE" != "" ]]; then
+            log_success "ngrok tunnels started!"
+            
+            # Parse and display tunnel URLs
+            echo -e "\n${PURPLE}🌐 Public URLs:${NC}"
+            echo "$NGROK_API_RESPONSE" | grep -o '"public_url":"[^"]*' | cut -d'"' -f4 | while read -r url; do
+                if [[ "$url" == *"camera-viewer"* ]]; then
+                    echo -e "   ${CYAN}📱 Camera Viewer:${NC} $url"
+                    CAMERA_PUBLIC_URL="$url"
+                elif [[ "$url" == *"robot-monitor"* ]]; then
+                    echo -e "   ${CYAN}🤖 Robot Monitor:${NC} $url"
+                    ROBOT_PUBLIC_URL="$url"
+                elif [[ "$url" == *"llava-api"* ]]; then
+                    echo -e "   ${CYAN}🧠 LLaVA API:${NC} $url"
+                    API_PUBLIC_URL="$url"
+                fi
+            done
+            echo ""
+        else
+            log_warning "Could not retrieve ngrok tunnel URLs. Check http://localhost:4040"
+        fi
     fi
 }
 
@@ -198,6 +307,7 @@ wait_for_service() {
 # AUTO-SETUP: Install everything if missing
 log_info "Checking and installing dependencies..."
 detect_system
+check_ngrok
 install_llama_cpp
 download_models
 install_node_deps
@@ -208,6 +318,7 @@ pkill -f "node.*server.js" || true
 pkill -f "node.*camera-server.js" || true
 pkill -f "node.*robot-monitor-server.js" || true
 pkill -f "llama-server" || true
+pkill -f "ngrok" || true
 sleep 2
 
 # Start llama.cpp server directly
@@ -257,21 +368,17 @@ if [ -f "camera-server.js" ]; then
     CAMERA_PID=$!
 fi
 
-# Start RTSP proxy
-if [ -f "rtsp-proxy.js" ]; then
-    node rtsp-proxy.js &
-    RTSP_PID=$!
-fi
-
 # Start robot monitor - use enhanced version with multi-model support
+# Note: The enhanced version includes RTSP proxy functionality, so we don't need separate rtsp-proxy.js
 if [ -f "robot-monitor-server-enhanced.js" ]; then
-    log_info "Starting enhanced robot monitor with multi-model support..."
+    log_info "Starting enhanced robot monitor with multi-model support (includes RTSP proxy)..."
     node robot-monitor-server-enhanced.js &
     ROBOT_PID=$!
-elif [ -f "robot-monitor-server.js" ]; then
-    log_info "Starting standard robot monitor..."
-    node robot-monitor-server.js &
-    ROBOT_PID=$!
+elif [ -f "rtsp-proxy.js" ]; then
+    # Fallback to simple RTSP proxy if enhanced version not available
+    log_info "Starting RTSP proxy..."
+    node rtsp-proxy.js &
+    RTSP_PID=$!
 fi
 
 # Wait for camera services to be ready
@@ -287,6 +394,9 @@ else
     echo -e "${YELLOW}⚠️  RTSP proxy may not be ready yet${NC}"
 fi
 
+# Start ngrok tunnels
+start_ngrok
+
 # Final status check
 echo ""
 echo "========================================"
@@ -296,18 +406,32 @@ echo "========================================"
 check_service 8080 "llama.cpp server"
 check_service 3000 "Camera viewer"
 check_service 3001 "RTSP proxy"
+if [[ "$SKIP_NGROK" != "true" ]]; then
+    check_service 4040 "ngrok web interface"
+fi
 
 echo ""
 echo "========================================"
 echo -e "${GREEN}🎉 System Ready!${NC}"
 echo "========================================"
 echo ""
-echo -e "${GREEN}📱 Access Points:${NC}"
+echo -e "${GREEN}📱 Local Access Points:${NC}"
 echo "   • Camera viewer: http://localhost:3000"
 echo "   • RTSP proxy/Robot Monitor: http://localhost:3001"
 echo "   • LLaVA test: http://localhost:3000"
 echo "   • LLaVA API: http://localhost:8080/v1/chat/completions"
+if [[ "$SKIP_NGROK" != "true" ]]; then
+    echo "   • ngrok dashboard: http://localhost:4040"
+fi
 echo ""
+
+if [[ "$SKIP_NGROK" != "true" ]]; then
+    echo -e "${PURPLE}🌐 Remote Access:${NC}"
+    echo "   Check ngrok dashboard at http://localhost:4040 for public URLs"
+    echo "   Or run: curl -s http://localhost:4040/api/tunnels | jq '.tunnels[].public_url'"
+    echo ""
+fi
+
 echo -e "${GREEN}✨ Multi-Model Features:${NC}"
 echo "   • Model switching: Use dropdown in header"
 echo "   • Benchmark models: Click ⚡ button"
@@ -318,7 +442,7 @@ echo -e "${YELLOW}🛑 Press Ctrl+C to stop all services${NC}"
 echo ""
 
 # Trap to cleanup on exit
-trap 'echo -e "\n${YELLOW}🛑 Shutting down services...${NC}"; pkill -f "llama-server" || true; pkill -f "node.*server.js" || true; pkill -f "node.*camera-server.js" || true; pkill -f "node.*robot-monitor-server.js" || true; echo -e "${GREEN}✅ All services stopped${NC}"; exit 0' INT TERM
+trap 'echo -e "\n${YELLOW}🛑 Shutting down services...${NC}"; pkill -f "llama-server" || true; pkill -f "node.*server.js" || true; pkill -f "node.*camera-server.js" || true; pkill -f "node.*robot-monitor-server.js" || true; pkill -f "ngrok" || true; echo -e "${GREEN}✅ All services stopped${NC}"; exit 0' INT TERM
 
 # Keep the script running and monitor services
 while true; do
@@ -333,6 +457,12 @@ while true; do
     if ! lsof -Pi :3000 -sTCP:LISTEN -t >/dev/null 2>&1; then
         echo -e "${RED}❌ Camera viewer stopped unexpectedly${NC}"
         break
+    fi
+    
+    # Check ngrok status if enabled
+    if [[ "$SKIP_NGROK" != "true" ]] && ! pgrep -f "ngrok start" > /dev/null; then
+        echo -e "${YELLOW}⚠️  ngrok stopped. Restarting...${NC}"
+        start_ngrok
     fi
 done
 

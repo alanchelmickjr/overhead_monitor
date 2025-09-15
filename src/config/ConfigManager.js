@@ -154,6 +154,18 @@ const configSchema = Joi.object({
     maxFrameHeight: Joi.number().positive().default(1080)
   }),
   
+  frameBuffer: Joi.object({
+    enabled: Joi.boolean().default(true),
+    maxMemoryFrames: Joi.number().positive().default(100),
+    diskStorage: Joi.object({
+      enabled: Joi.boolean().default(true),
+      path: Joi.string().default('./data/frames'),
+      maxSizeMB: Joi.number().positive().default(1024),
+      retentionHours: Joi.number().positive().default(24)
+    }),
+    captureMetadata: Joi.boolean().default(true)
+  }),
+  
   database: Joi.object({
     type: Joi.string().valid('postgresql', 'mysql', 'sqlite').default('postgresql'),
     host: Joi.string().default('localhost'),

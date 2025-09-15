@@ -1,5 +1,5 @@
 {
-  "name": "robot-overhead-monitor",
+  "name": "lekiwi-pen-nanny-cam",
   "version": "1.0.0",
   "description": "Real-time robot monitoring system using overhead IP cameras and SmolVLM vision analysis",
   "main": "server.js",

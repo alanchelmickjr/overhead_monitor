@@ -4,6 +4,7 @@
 
 const winston = require('winston');
 const jwt = require('jsonwebtoken');
+const FrameBufferManager = require('../camera/FrameBufferManager');
 
 const logger = winston.createLogger({
   level: 'info',
@@ -16,9 +17,16 @@ class WebSocketHandler {
     this.io = io;
     this.services = services;
     
+    // Frame buffer manager
+    this.frameBufferManager = new FrameBufferManager({
+      defaultBufferSize: 100,
+      maxBufferMemory: 200 * 1024 * 1024 // 200MB
+    });
+    
     // Connected clients
     this.clients = new Map();
     this.rooms = new Map();
+    this.frameSubscriptions = new Map(); // Track frame subscriptions
     
     // Statistics
     this.stats = {
@@ -77,7 +85,10 @@ class WebSocketHandler {
       role: socket.role,
       connectedAt: new Date(),
       address: socket.handshake.address,
-      userAgent: socket.handshake.headers['user-agent']
+      userAgent: socket.handshake.headers['user-agent'],
+      frameSubscriptions: new Set(),
+      connectionQuality: 'good',
+      lastActivity: Date.now()
     };
     
     this.clients.set(socket.id, clientInfo);
@@ -168,6 +179,31 @@ class WebSocketHandler {
     // Get metrics
     socket.on('get_metrics', (data) => {
       this.handleGetMetrics(socket, data);
+    });
+    
+    // Frame buffer specific handlers
+    socket.on('subscribe_frames', (data) => {
+      this.handleFrameSubscription(socket, data);
+    });
+    
+    socket.on('unsubscribe_frames', (data) => {
+      this.handleFrameUnsubscription(socket, data);
+    });
+    
+    socket.on('get_frame_history', (data) => {
+      this.handleGetFrameHistory(socket, data);
+    });
+    
+    socket.on('get_buffer_stats', (data) => {
+      this.handleGetBufferStats(socket, data);
+    });
+    
+    socket.on('clear_buffer', (data) => {
+      this.handleClearBuffer(socket, data);
+    });
+    
+    socket.on('set_frame_rate', (data) => {
+      this.handleSetFrameRate(socket, data);
     });
     
     // Error handler for socket
@@ -268,6 +304,11 @@ class WebSocketHandler {
       if (!this.services.cameraManager) {
         throw new Error('Camera manager not available');
       }
+      
+      // Initialize buffer for camera if needed
+      this.frameBufferManager.initializeBuffer(cameraId, {
+        bufferSize: 100
+      });
       
       await this.services.cameraManager.startStream(cameraId, { interval });
       
@@ -673,6 +714,15 @@ class WebSocketHandler {
       logger.info(`Client disconnected: ${socket.id} after ${duration}ms - Reason: ${reason}`);
     }
     
+    // Clean up frame subscriptions
+    const frameSubscriptions = clientInfo.frameSubscriptions;
+    if (frameSubscriptions && frameSubscriptions.size > 0) {
+      for (const subscriberId of frameSubscriptions) {
+        this.frameBufferManager.unsubscribe(subscriberId);
+        this.frameSubscriptions.delete(subscriberId);
+      }
+    }
+    
     this.clients.delete(socket.id);
   }
 
@@ -680,29 +730,76 @@ class WebSocketHandler {
    * Broadcast frame to subscribers
    */
   broadcastFrame(frameData) {
-    const room = `camera:${frameData.cameraId}`;
-    
-    const data = {
+    // Add frame to buffer manager
+    const frameBuffer = {
+      id: require('uuid').v4(),
       cameraId: frameData.cameraId,
       timestamp: frameData.timestamp,
+      data: Buffer.from(frameData.image, 'base64'),
       image: frameData.image,
       format: frameData.format || 'jpeg',
-      analysis: frameData.analysis,
-      processingTime: frameData.processingTime || (Date.now() - new Date(frameData.timestamp).getTime()),
-      stats: {
-        activityLevel: frameData.activityLevel,
-        currentInterval: frameData.currentInterval,
-        eventCounts: frameData.eventCounts
-      }
+      analysis: frameData.analysis
     };
     
-    this.io.to(room).emit('frame', data);
+    // Add to buffer
+    this.frameBufferManager.addFrame(frameBuffer);
+    
+    // Get client-specific frame data based on subscription
+    const room = `camera:${frameData.cameraId}`;
+    const clients = this.io.sockets.adapter.rooms.get(room);
+    
+    if (clients && clients.size > 0) {
+      for (const socketId of clients) {
+        const socket = this.io.sockets.sockets.get(socketId);
+        if (!socket) continue;
+        
+        const clientInfo = this.clients.get(socketId);
+        if (!clientInfo) continue;
+        
+        // Check if client has frame rate limit
+        if (clientInfo.frameRateLimit) {
+          const now = Date.now();
+          const frameInterval = 1000 / clientInfo.frameRateLimit;
+          
+          if (clientInfo.lastFrameSent &&
+              (now - clientInfo.lastFrameSent) < frameInterval) {
+            continue;
+          }
+          
+          clientInfo.lastFrameSent = now;
+        }
+        
+        // Send frame to client
+        const data = {
+          cameraId: frameData.cameraId,
+          timestamp: frameData.timestamp,
+          image: frameData.image,
+          format: frameData.format || 'jpeg',
+          analysis: frameData.analysis,
+          processingTime: frameData.processingTime || (Date.now() - new Date(frameData.timestamp).getTime()),
+          stats: {
+            activityLevel: frameData.activityLevel,
+            currentInterval: frameData.currentInterval,
+            eventCounts: frameData.eventCounts
+          }
+        };
+        
+        socket.emit('frame', data);
+      }
+    }
     
     this.stats.broadcastsSent++;
-    this.stats.messagesSent += this.io.sockets.adapter.rooms.get(room)?.size || 0;
+    this.stats.messagesSent += clients?.size || 0;
     
     // Update real-time metrics
     this.updateRealtimeMetrics(frameData);
+    
+    // Emit buffer stats periodically
+    if (!this.bufferStatsTimer) {
+      this.bufferStatsTimer = setInterval(() => {
+        this.broadcastBufferStats();
+      }, 5000);
+    }
   }
   
   /**
@@ -848,6 +945,227 @@ class WebSocketHandler {
     this.stats.broadcastsSent++;
     this.stats.messagesSent += this.clients.size;
   }
+  
+  /**
+   * Handle frame subscription
+   */
+  async handleFrameSubscription(socket, data) {
+    const { subscriberId, cameraIds = [], mode = 'live', bufferReplayCount = 0 } = data;
+    
+    try {
+      const clientInfo = this.clients.get(socket.id);
+      if (!clientInfo) throw new Error('Client not found');
+      
+      // Create subscription with callback
+      const subscription = this.frameBufferManager.subscribe({
+        subscriberId,
+        cameraIds,
+        mode,
+        bufferReplayCount,
+        callback: (frame) => {
+          // Send frame to this specific client
+          socket.emit(frame.isBuffered ? 'frame_buffered' : 'frame', {
+            cameraId: frame.cameraId,
+            timestamp: frame.timestamp,
+            image: frame.image,
+            format: frame.format || 'jpeg',
+            analysis: frame.analysis,
+            isBuffered: frame.isBuffered || false,
+            isHistorical: frame.isHistorical || false
+          });
+        }
+      });
+      
+      // Track subscription
+      clientInfo.frameSubscriptions.add(subscriberId);
+      this.frameSubscriptions.set(subscriberId, {
+        socketId: socket.id,
+        subscription
+      });
+      
+      socket.emit('frame_subscription_success', {
+        subscriberId,
+        mode,
+        cameraIds
+      });
+      
+      logger.info(`Frame subscription created: ${subscriberId} for socket ${socket.id}`);
+      
+    } catch (error) {
+      socket.emit('frame_subscription_error', {
+        message: error.message,
+        code: 'SUBSCRIPTION_FAILED'
+      });
+    }
+  }
+  
+  /**
+   * Handle frame unsubscription
+   */
+  async handleFrameUnsubscription(socket, data) {
+    const { subscriberId } = data;
+    
+    try {
+      const clientInfo = this.clients.get(socket.id);
+      if (clientInfo) {
+        clientInfo.frameSubscriptions.delete(subscriberId);
+      }
+      
+      this.frameBufferManager.unsubscribe(subscriberId);
+      this.frameSubscriptions.delete(subscriberId);
+      
+      socket.emit('frame_unsubscription_success', { subscriberId });
+      
+    } catch (error) {
+      socket.emit('error', {
+        message: `Failed to unsubscribe: ${error.message}`,
+        code: 'UNSUBSCRIBE_FAILED'
+      });
+    }
+  }
+  
+  /**
+   * Handle get frame history
+   */
+  async handleGetFrameHistory(socket, data) {
+    const { cameraId, count = 10, newest = true } = data;
+    
+    try {
+      const frames = this.frameBufferManager.getFrames(cameraId, count, newest);
+      
+      socket.emit('frame_history', {
+        cameraId,
+        frames: frames.map(frame => ({
+          cameraId: frame.cameraId,
+          timestamp: frame.timestamp,
+          image: frame.image,
+          format: frame.format || 'jpeg',
+          analysis: frame.analysis
+        }))
+      });
+      
+    } catch (error) {
+      socket.emit('error', {
+        message: `Failed to get frame history: ${error.message}`,
+        code: 'HISTORY_FAILED'
+      });
+    }
+  }
+  
+  /**
+   * Handle get buffer stats
+   */
+  async handleGetBufferStats(socket) {
+    try {
+      const stats = this.frameBufferManager.getStatistics();
+      socket.emit('buffer_stats', stats);
+    } catch (error) {
+      socket.emit('error', {
+        message: `Failed to get buffer stats: ${error.message}`,
+        code: 'STATS_FAILED'
+      });
+    }
+  }
+  
+  /**
+   * Handle clear buffer
+   */
+  async handleClearBuffer(socket, data) {
+    const { cameraId } = data;
+    
+    try {
+      if (cameraId) {
+        this.frameBufferManager.clearBuffer(cameraId);
+      } else {
+        this.frameBufferManager.clearAllBuffers();
+      }
+      
+      socket.emit('buffer_cleared', { cameraId });
+      
+    } catch (error) {
+      socket.emit('error', {
+        message: `Failed to clear buffer: ${error.message}`,
+        code: 'CLEAR_FAILED'
+      });
+    }
+  }
+  
+  /**
+   * Handle set frame rate
+   */
+  async handleSetFrameRate(socket, data) {
+    const { frameRate } = data;
+    
+    try {
+      const clientInfo = this.clients.get(socket.id);
+      if (!clientInfo) throw new Error('Client not found');
+      
+      // Set frame rate limit for this client
+      clientInfo.frameRateLimit = Math.max(1, Math.min(60, frameRate));
+      
+      socket.emit('frame_rate_set', { frameRate: clientInfo.frameRateLimit });
+      
+      logger.info(`Frame rate set to ${clientInfo.frameRateLimit} for socket ${socket.id}`);
+      
+    } catch (error) {
+      socket.emit('error', {
+        message: `Failed to set frame rate: ${error.message}`,
+        code: 'FRAME_RATE_FAILED'
+      });
+    }
+  }
+  
+  /**
+   * Broadcast buffer statistics
+   */
+  broadcastBufferStats() {
+    const stats = this.frameBufferManager.getStatistics();
+    this.io.emit('buffer_stats', stats);
+  }
+  
+  /**
+   * Update client connection quality
+   */
+  updateConnectionQuality(socketId, quality) {
+    const clientInfo = this.clients.get(socketId);
+    if (!clientInfo) return;
+    
+    clientInfo.connectionQuality = quality;
+    
+    const socket = this.io.sockets.sockets.get(socketId);
+    if (socket) {
+      socket.emit('connection_quality', { quality });
+    }
+  }
+  
+  /**
+   * Monitor client connections and adjust quality
+   */
+  monitorConnections() {
+    if (!this.connectionMonitorTimer) {
+      this.connectionMonitorTimer = setInterval(() => {
+        for (const [socketId, clientInfo] of this.clients) {
+          const socket = this.io.sockets.sockets.get(socketId);
+          if (!socket) continue;
+          
+          // Check latency and activity
+          const now = Date.now();
+          const inactiveTime = now - clientInfo.lastActivity;
+          
+          let quality = 'good';
+          if (inactiveTime > 30000) {
+            quality = 'poor';
+          } else if (inactiveTime > 10000) {
+            quality = 'medium';
+          }
+          
+          if (quality !== clientInfo.connectionQuality) {
+            this.updateConnectionQuality(socketId, quality);
+          }
+        }
+      }, 5000);
+    }
+  }
 
   /**
    * Get connected clients
@@ -941,6 +1259,30 @@ class WebSocketHandler {
     this.io.emit(data.type || 'message', data);
     this.stats.broadcastsSent++;
     this.stats.messagesSent += this.clients.size;
+  }
+  /**
+   * Destroy handler and clean up
+   */
+  destroy() {
+    // Clear timers
+    if (this.bufferStatsTimer) {
+      clearInterval(this.bufferStatsTimer);
+    }
+    
+    if (this.connectionMonitorTimer) {
+      clearInterval(this.connectionMonitorTimer);
+    }
+    
+    // Destroy frame buffer manager
+    if (this.frameBufferManager) {
+      this.frameBufferManager.destroy();
+    }
+    
+    // Clear all clients
+    this.clients.clear();
+    this.frameSubscriptions.clear();
+    
+    logger.info('WebSocket handler destroyed');
   }
 }
 

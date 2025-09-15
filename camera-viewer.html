@@ -225,7 +225,109 @@
             width: auto;
             flex: 1;
         }
+        
+        /* Frame buffer specific styles */
+        .buffer-controls {
+            background: #222;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            border: 1px solid #444;
+        }
+        
+        .buffer-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .buffer-stat {
+            background: #1a1a1a;
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .buffer-stat-label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        
+        .buffer-stat-value {
+            font-size: 20px;
+            color: #4a9eff;
+            font-weight: bold;
+        }
+        
+        .streaming-mode-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .mode-btn {
+            flex: 1;
+            padding: 10px;
+            background: #333;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            color: #999;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .mode-btn.active {
+            background: #4a9eff;
+            color: white;
+            border-color: #5ab0ff;
+        }
+        
+        .mode-btn:hover:not(.active) {
+            background: #444;
+            border-color: #555;
+        }
+        
+        .buffer-progress {
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .buffer-progress-bar {
+            height: 100%;
+            background: #4a9eff;
+            transition: width 0.3s ease;
+        }
+        
+        .connection-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-left: 5px;
+        }
+        
+        .connection-good { background: #4ade80; }
+        .connection-medium { background: #fbbf24; }
+        .connection-poor { background: #ef4444; }
+        
+        .buffer-replay-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .buffer-replay-controls button {
+            flex: 1;
+        }
     </style>
+    <!-- Include frame handler -->
+    <script src="/js/frameHandler.js"></script>
 </head>
 <body>
     <div class="container">
@@ -244,6 +346,7 @@
                 <div class="video-container">
                     <img id="videoDisplay" style="display:none;" />
                     <video id="videoElement" style="display:none; width:100%; height:100%;" autoplay></video>
+                    <canvas id="frameCanvas" style="display:none; width:100%; height:100%;" width="640" height="480"></canvas>
                     <div class="no-feed" id="noFeed">
                         <div style="font-size: 48px;">📹</div>
                         <p>No camera feed</p>
@@ -275,6 +378,61 @@
                     <div class="info-item">
                         <span class="info-label">Analysis Rate:</span>
                         <span class="info-value" id="analysisRate">--</span>
+                    </div>
+                </div>
+                
+                <!-- Frame Buffer Controls -->
+                <div class="buffer-controls" id="bufferControls" style="display: none;">
+                    <h3 style="margin-top: 0; margin-bottom: 15px; color: #4a9eff;">Frame Buffer Controls</h3>
+                    
+                    <div class="streaming-mode-selector">
+                        <button class="mode-btn active" data-mode="direct" onclick="switchStreamingMode('direct')">
+                            Direct MJPEG
+                        </button>
+                        <button class="mode-btn" data-mode="websocket" onclick="switchStreamingMode('websocket')">
+                            WebSocket Stream
+                        </button>
+                        <button class="mode-btn" data-mode="buffered" onclick="switchStreamingMode('buffered')">
+                            Buffered Mode
+                        </button>
+                    </div>
+                    
+                    <div class="buffer-stats" id="bufferStatsDisplay" style="display: none;">
+                        <div class="buffer-stat">
+                            <div class="buffer-stat-label">Buffer Size</div>
+                            <div class="buffer-stat-value" id="bufferSize">0/30</div>
+                        </div>
+                        <div class="buffer-stat">
+                            <div class="buffer-stat-label">Frame Rate</div>
+                            <div class="buffer-stat-value" id="frameRate">0 FPS</div>
+                        </div>
+                        <div class="buffer-stat">
+                            <div class="buffer-stat-label">Network Latency</div>
+                            <div class="buffer-stat-value" id="networkLatency">0ms</div>
+                        </div>
+                        <div class="buffer-stat">
+                            <div class="buffer-stat-label">Connection
+                                <span class="connection-indicator connection-good" id="connectionIndicator"></span>
+                            </div>
+                            <div class="buffer-stat-value" id="connectionQuality">Good</div>
+                        </div>
+                    </div>
+                    
+                    <div class="buffer-progress">
+                        <div class="buffer-progress-bar" id="bufferProgress" style="width: 0%"></div>
+                    </div>
+                    
+                    <div class="buffer-replay-controls" id="replayControls" style="display: none;">
+                        <button onclick="replayBufferedFrames(10)">Replay Last 10</button>
+                        <button onclick="replayBufferedFrames(30)">Replay Last 30</button>
+                        <button onclick="clearFrameBuffer()">Clear Buffer</button>
+                    </div>
+                    
+                    <div style="margin-top: 15px;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="adaptiveStreaming" checked onchange="toggleAdaptiveStreaming()">
+                            <span>Enable Adaptive Streaming</span>
+                        </label>
                     </div>
                 </div>
             </div>
@@ -345,6 +503,10 @@
         let frameCount = 0;
         let frameInterval = null;
         let currentStream = null;
+        let frameHandler = null;
+        let websocket = null;
+        let currentMode = 'direct';
+        let adaptiveStreamingEnabled = true;
         
         // Update camera URL based on protocol
         function updateCameraURL() {
@@ -364,10 +526,130 @@
             }
         }
         
+        // Initialize WebSocket connection
+        function initializeWebSocket() {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                return;
+            }
+            
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}`;
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = () => {
+                console.log('WebSocket connected');
+                document.getElementById('bufferControls').style.display = 'block';
+            };
+            
+            websocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            websocket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateConnectionStatus('WebSocket error', 'error');
+            };
+            
+            websocket.onclose = () => {
+                console.log('WebSocket disconnected');
+                setTimeout(initializeWebSocket, 5000); // Reconnect after 5 seconds
+            };
+        }
+        
+        // Handle WebSocket messages
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'frame':
+                    if (frameHandler && (currentMode === 'websocket' || currentMode === 'buffered')) {
+                        frameHandler.addWebSocketFrame(data);
+                    }
+                    break;
+                    
+                case 'buffer_stats':
+                    updateBufferStats(data);
+                    break;
+                    
+                case 'connection_quality':
+                    updateConnectionQuality(data.quality);
+                    break;
+            }
+        }
+        
+        // Initialize frame handler
+        function initializeFrameHandler() {
+            if (typeof FrameHandler === 'undefined') {
+                console.warn('FrameHandler not available');
+                return;
+            }
+            
+            const canvas = document.getElementById('frameCanvas');
+            
+            frameHandler = new FrameHandler({
+                displayElement: document.getElementById('videoDisplay'),
+                canvasElement: canvas,
+                mode: 'auto',
+                maxBufferSize: 30,
+                targetFPS: 30,
+                smoothTransitions: true,
+                onFrameDisplayed: (frame) => {
+                    // Update frame counter
+                },
+                onPerformanceUpdate: (metrics) => {
+                    updatePerformanceMetrics(metrics);
+                }
+            });
+        }
+        
+        // Switch streaming mode
+        function switchStreamingMode(mode) {
+            currentMode = mode;
+            
+            // Update UI
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            
+            // Show/hide relevant UI elements
+            const showBufferStats = mode === 'websocket' || mode === 'buffered';
+            document.getElementById('bufferStatsDisplay').style.display = showBufferStats ? 'grid' : 'none';
+            document.getElementById('replayControls').style.display = mode === 'buffered' ? 'flex' : 'none';
+            
+            // Switch display elements
+            const img = document.getElementById('videoDisplay');
+            const canvas = document.getElementById('frameCanvas');
+            
+            if (mode === 'direct') {
+                img.style.display = 'block';
+                canvas.style.display = 'none';
+                if (frameHandler) frameHandler.stop();
+            } else {
+                img.style.display = 'none';
+                canvas.style.display = 'block';
+                if (frameHandler) {
+                    frameHandler.switchMode('websocket');
+                    frameHandler.start();
+                }
+            }
+            
+            // Reconnect if needed
+            if (isConnected) {
+                disconnectCamera();
+                setTimeout(() => connectCamera(), 100);
+            }
+        }
+        
         // Connect to camera
         async function connectCamera() {
             const protocol = document.getElementById('cameraProtocol').value;
             const url = document.getElementById('cameraURL').value;
+            
+            // Initialize WebSocket if needed
+            if (currentMode !== 'direct') {
+                initializeWebSocket();
+                initializeFrameHandler();
+            }
             
             if (protocol === 'rtsp') {
                 // For RTSP, we'll need to use a proxy server
@@ -408,13 +690,27 @@
         function connectMJPEG(url) {
             const img = document.getElementById('videoDisplay');
             const video = document.getElementById('videoElement');
+            const canvas = document.getElementById('frameCanvas');
             const noFeed = document.getElementById('noFeed');
             
-            video.style.display = 'none';
-            img.style.display = 'block';
-            noFeed.style.display = 'none';
-            
-            img.src = url;
+            if (currentMode === 'direct') {
+                video.style.display = 'none';
+                canvas.style.display = 'none';
+                img.style.display = 'block';
+                noFeed.style.display = 'none';
+                
+                img.src = url;
+            } else {
+                // Use frame handler for WebSocket modes
+                video.style.display = 'none';
+                img.style.display = 'none';
+                canvas.style.display = 'block';
+                noFeed.style.display = 'none';
+                
+                if (frameHandler) {
+                    frameHandler.start(url);
+                }
+            }
             
             isConnected = true;
             updateStatus('Connected', true);
@@ -452,11 +748,17 @@ vlc ${url} --sout '#transcode{vcodec=mjpg}:http{mux=mpjpeg,dst=:8080/}'
             
             const img = document.getElementById('videoDisplay');
             const video = document.getElementById('videoElement');
+            const canvas = document.getElementById('frameCanvas');
             const noFeed = document.getElementById('noFeed');
             
             img.style.display = 'none';
             video.style.display = 'none';
+            canvas.style.display = 'none';
             noFeed.style.display = 'block';
+            
+            if (frameHandler) {
+                frameHandler.stop();
+            }
             
             isConnected = false;
             updateStatus('Disconnected', false);
@@ -704,6 +1006,90 @@ vlc ${url} --sout '#transcode{vcodec=mjpg}:http{mux=mpjpeg,dst=:8080/}'
         setInterval(() => {
             if (isConnected) frames++;
         }, 100);
+        
+        // Frame buffer specific functions
+        function updateBufferStats(stats) {
+            if (!stats || !stats.cameras) return;
+            
+            // Find stats for current camera
+            const cameraStats = Object.values(stats.cameras)[0]; // Assuming single camera for now
+            if (!cameraStats) return;
+            
+            // Update buffer size
+            document.getElementById('bufferSize').textContent =
+                `${cameraStats.currentFrames}/${cameraStats.bufferSize}`;
+            
+            // Update buffer progress
+            const progress = (cameraStats.currentFrames / cameraStats.bufferSize) * 100;
+            document.getElementById('bufferProgress').style.width = `${progress}%`;
+            
+            // Update memory usage
+            const memoryMB = (stats.totalMemoryUsage / (1024 * 1024)).toFixed(1);
+            // You can display this somewhere if needed
+        }
+        
+        function updatePerformanceMetrics(metrics) {
+            document.getElementById('frameRate').textContent = `${metrics.fps} FPS`;
+            document.getElementById('networkLatency').textContent = `${metrics.networkLatency}ms`;
+            
+            // Update FPS in main display
+            document.getElementById('fps').textContent = metrics.fps;
+        }
+        
+        function updateConnectionQuality(quality) {
+            const indicator = document.getElementById('connectionIndicator');
+            const qualityText = document.getElementById('connectionQuality');
+            
+            indicator.className = `connection-indicator connection-${quality}`;
+            qualityText.textContent = quality.charAt(0).toUpperCase() + quality.slice(1);
+            
+            // Auto-adjust if adaptive streaming is enabled
+            if (adaptiveStreamingEnabled && frameHandler) {
+                switch (quality) {
+                    case 'poor':
+                        frameHandler.setTargetFPS(10);
+                        break;
+                    case 'medium':
+                        frameHandler.setTargetFPS(20);
+                        break;
+                    case 'good':
+                        frameHandler.setTargetFPS(30);
+                        break;
+                }
+            }
+        }
+        
+        function replayBufferedFrames(count) {
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                alert('WebSocket not connected');
+                return;
+            }
+            
+            websocket.send(JSON.stringify({
+                type: 'get_frame_history',
+                cameraId: 'camera1', // Update with actual camera ID
+                count: count,
+                newest: true
+            }));
+        }
+        
+        function clearFrameBuffer() {
+            if (frameHandler) {
+                frameHandler.clearBuffer();
+            }
+            
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({
+                    type: 'clear_buffer',
+                    cameraId: 'camera1' // Update with actual camera ID
+                }));
+            }
+        }
+        
+        function toggleAdaptiveStreaming() {
+            adaptiveStreamingEnabled = document.getElementById('adaptiveStreaming').checked;
+            console.log('Adaptive streaming:', adaptiveStreamingEnabled ? 'enabled' : 'disabled');
+        }
     </script>
 </body>
 </html>

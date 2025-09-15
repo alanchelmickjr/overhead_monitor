@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ball-in-Cup Training Monitor</title>
+    <title>LeKiwi Pen Nanny Cam</title>
     <style>
         body {
             background: #000;
@@ -528,13 +528,112 @@
                 transform: scale(1);
             }
         }
+        
+        /* Frame buffer controls */
+        .frame-buffer-panel {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border: 2px solid #4a9eff;
+        }
+        
+        .frame-buffer-panel h3 {
+            margin-top: 0;
+            color: #4a9eff;
+            font-size: 18px;
+        }
+        
+        .buffer-mode-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .buffer-mode-btn {
+            flex: 1;
+            padding: 8px 12px;
+            background: #2a2a2a;
+            border: 2px solid transparent;
+            border-radius: 4px;
+            color: #888;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+        
+        .buffer-mode-btn.active {
+            background: #4a9eff;
+            color: white;
+            border-color: #5ab0ff;
+        }
+        
+        .buffer-mode-btn:hover:not(.active) {
+            background: #333;
+            border-color: #444;
+        }
+        
+        .buffer-info {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .buffer-info-item {
+            background: #2a2a2a;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .buffer-info-label {
+            font-size: 11px;
+            color: #888;
+            text-transform: uppercase;
+        }
+        
+        .buffer-info-value {
+            font-size: 18px;
+            color: #4a9eff;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        
+        .buffer-controls-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .buffer-controls-row button {
+            flex: 1;
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+        
+        .buffer-progress {
+            height: 6px;
+            background: #2a2a2a;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        
+        .buffer-progress-fill {
+            height: 100%;
+            background: #4a9eff;
+            transition: width 0.3s ease;
+        }
     </style>
+    <!-- Include frame handler -->
+    <script src="/js/frameHandler.js"></script>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <div class="header-left">
-                <h1>🎯 Ball-in-Cup Training Monitor</h1>
+                <h1>🤖 LeKiwi Pen Nanny Cam</h1>
                 <div class="model-selector">
                     <label for="modelSelect">Model:</label>
                     <select id="modelSelect">
@@ -586,18 +685,18 @@
                 
                 <!-- Ball Status Display -->
                 <div class="ball-status">
-                    <div id="ballIndicator" class="ball-indicator out-cup">🔵</div>
+                    <div id="ballIndicator" class="ball-indicator out-cup">🏀</div>
                     <div>
-                        <div style="font-size: 16px; font-weight: bold;">Ball Status: <span id="ballStatusText" style="color: #ffaa00;">OUT OF CUP</span></div>
-                        <div style="font-size: 14px; color: #888; margin-top: 5px;">Last transition: <span id="lastTransition">None</span></div>
+                        <div style="font-size: 16px; font-weight: bold;">Ball Status: <span id="ballStatusText" style="color: #ffaa00;">NOT IN BUCKET</span></div>
+                        <div style="font-size: 14px; color: #888; margin-top: 5px;">Last score: <span id="lastTransition">None</span></div>
                     </div>
                 </div>
                 
                 <!-- Score Display -->
                 <div class="score-display">
-                    <h2>🏆 Training Score</h2>
+                    <h2>🏆 Robot Arena Score</h2>
                     <div class="score-value" id="scoreValue">0</div>
-                    <div class="ready-indicator not-ready" id="readyIndicator">Not Ready - Ball not in position</div>
+                    <div class="ready-indicator not-ready" id="readyIndicator">Waiting for robot to score...</div>
                     <button onclick="resetScore()" style="margin-top: 15px; background: #ff4444;">Reset Score</button>
                 </div>
                 
@@ -635,7 +734,7 @@
                     <!-- Ball tracking conditions -->
                     <div class="condition-item">
                         <input type="checkbox" id="cond1" checked>
-                        <label for="cond1">Track ball placement in cup</label>
+                        <label for="cond1">Track ball placement in white bucket</label>
                         <button class="remove-btn" onclick="removeCondition(this)">Remove</button>
                     </div>
                     <div class="condition-item">
@@ -686,6 +785,59 @@
                         <div style="color: #666; text-align: center;">No detections yet...</div>
                     </div>
                 </div>
+                
+                <!-- Frame Buffer Panel -->
+                <div class="frame-buffer-panel">
+                    <h3>🎞️ Frame Buffer Controls</h3>
+                    
+                    <div class="buffer-mode-selector">
+                        <button class="buffer-mode-btn active" data-mode="direct" onclick="setBufferMode('direct')">
+                            Direct Stream
+                        </button>
+                        <button class="buffer-mode-btn" data-mode="websocket" onclick="setBufferMode('websocket')">
+                            WebSocket
+                        </button>
+                        <button class="buffer-mode-btn" data-mode="buffered" onclick="setBufferMode('buffered')">
+                            Buffered
+                        </button>
+                    </div>
+                    
+                    <div class="buffer-info" id="bufferInfo" style="display: none;">
+                        <div class="buffer-info-item">
+                            <div class="buffer-info-label">Buffer Size</div>
+                            <div class="buffer-info-value" id="bufferSize">0/30</div>
+                        </div>
+                        <div class="buffer-info-item">
+                            <div class="buffer-info-label">Frame Rate</div>
+                            <div class="buffer-info-value" id="bufferFPS">0 FPS</div>
+                        </div>
+                        <div class="buffer-info-item">
+                            <div class="buffer-info-label">Network</div>
+                            <div class="buffer-info-value" id="networkStatus">Good</div>
+                        </div>
+                        <div class="buffer-info-item">
+                            <div class="buffer-info-label">Memory</div>
+                            <div class="buffer-info-value" id="memoryUsage">0 MB</div>
+                        </div>
+                    </div>
+                    
+                    <div class="buffer-progress">
+                        <div class="buffer-progress-fill" id="bufferProgressBar" style="width: 0%"></div>
+                    </div>
+                    
+                    <div class="buffer-controls-row" id="bufferActions" style="display: none;">
+                        <button onclick="replayFrames(10)">Replay 10</button>
+                        <button onclick="replayFrames(30)">Replay 30</button>
+                        <button onclick="clearBuffer()">Clear</button>
+                    </div>
+                    
+                    <div style="margin-top: 15px;">
+                        <label style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="adaptiveMode" checked onchange="toggleAdaptive()">
+                            <span style="color: #888; font-size: 14px;">Adaptive Streaming</span>
+                        </label>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -699,6 +851,12 @@
             frames: 0,
             alerts: 0
         };
+        
+        // Frame buffer variables
+        let frameHandler = null;
+        let frameBufferMode = 'direct';
+        let websocket = null;
+        let adaptiveEnabled = true;
         
         // Ball tracking state
         let ballState = {
@@ -721,6 +879,7 @@
             updateConnectionStatus('Connected to camera stream', 'success');
             loadSettings();
             updateStats();
+            initializeFrameBuffer();
             
             // Check stream status
             stream.onerror = () => {
@@ -730,6 +889,180 @@
                 updateConnectionStatus('Camera stream connected', 'success');
             };
         };
+        
+        // Initialize frame buffer functionality
+        function initializeFrameBuffer() {
+            if (typeof FrameHandler !== 'undefined') {
+                frameHandler = new FrameHandler({
+                    displayElement: stream,
+                    canvasElement: canvas,
+                    mode: 'auto',
+                    maxBufferSize: 30,
+                    targetFPS: 30,
+                    smoothTransitions: true,
+                    onFrameDisplayed: (frame) => {
+                        // Frame displayed callback
+                    },
+                    onPerformanceUpdate: (metrics) => {
+                        updateBufferMetrics(metrics);
+                    }
+                });
+            }
+            
+            // Initialize WebSocket for frame buffer
+            initializeWebSocket();
+        }
+        
+        // Initialize WebSocket connection
+        function initializeWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}`;
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = () => {
+                console.log('WebSocket connected for frame buffer');
+            };
+            
+            websocket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            websocket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+            
+            websocket.onclose = () => {
+                console.log('WebSocket disconnected');
+                setTimeout(initializeWebSocket, 5000); // Reconnect
+            };
+        }
+        
+        // Handle WebSocket messages
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'frame':
+                    if (frameHandler && frameBufferMode !== 'direct') {
+                        frameHandler.addWebSocketFrame(data);
+                    }
+                    break;
+                    
+                case 'buffer_stats':
+                    updateBufferStats(data);
+                    break;
+                    
+                case 'connection_quality':
+                    updateNetworkStatus(data.quality);
+                    break;
+            }
+        }
+        
+        // Set frame buffer mode
+        function setBufferMode(mode) {
+            frameBufferMode = mode;
+            
+            // Update UI
+            document.querySelectorAll('.buffer-mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            
+            // Show/hide buffer info
+            const showBufferInfo = mode !== 'direct';
+            document.getElementById('bufferInfo').style.display = showBufferInfo ? 'grid' : 'none';
+            document.getElementById('bufferActions').style.display = mode === 'buffered' ? 'flex' : 'none';
+            
+            // Configure frame handler
+            if (frameHandler) {
+                if (mode === 'direct') {
+                    frameHandler.stop();
+                } else {
+                    frameHandler.switchMode('websocket');
+                    frameHandler.start();
+                }
+            }
+        }
+        
+        // Update buffer metrics
+        function updateBufferMetrics(metrics) {
+            document.getElementById('bufferFPS').textContent = `${metrics.fps} FPS`;
+            
+            if (frameHandler) {
+                const bufferStatus = frameHandler.getBufferStatus();
+                document.getElementById('bufferSize').textContent =
+                    `${bufferStatus.size}/${bufferStatus.maxSize}`;
+                
+                const progress = bufferStatus.utilization;
+                document.getElementById('bufferProgressBar').style.width = `${progress}%`;
+            }
+        }
+        
+        // Update buffer stats from server
+        function updateBufferStats(stats) {
+            if (stats.totalMemoryUsage) {
+                const memoryMB = (stats.totalMemoryUsage / (1024 * 1024)).toFixed(1);
+                document.getElementById('memoryUsage').textContent = `${memoryMB} MB`;
+            }
+        }
+        
+        // Update network status
+        function updateNetworkStatus(quality) {
+            const statusMap = {
+                'good': '✅ Good',
+                'medium': '⚠️ Medium',
+                'poor': '❌ Poor'
+            };
+            document.getElementById('networkStatus').textContent = statusMap[quality] || quality;
+            
+            // Adaptive adjustment
+            if (adaptiveEnabled && frameHandler) {
+                switch (quality) {
+                    case 'poor':
+                        frameHandler.setTargetFPS(10);
+                        break;
+                    case 'medium':
+                        frameHandler.setTargetFPS(20);
+                        break;
+                    case 'good':
+                        frameHandler.setTargetFPS(30);
+                        break;
+                }
+            }
+        }
+        
+        // Replay buffered frames
+        function replayFrames(count) {
+            if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+                alert('WebSocket not connected');
+                return;
+            }
+            
+            websocket.send(JSON.stringify({
+                type: 'get_frame_history',
+                cameraId: 'camera1',
+                count: count,
+                newest: true
+            }));
+        }
+        
+        // Clear frame buffer
+        function clearBuffer() {
+            if (frameHandler) {
+                frameHandler.clearBuffer();
+            }
+            
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({
+                    type: 'clear_buffer',
+                    cameraId: 'camera1'
+                }));
+            }
+        }
+        
+        // Toggle adaptive mode
+        function toggleAdaptive() {
+            adaptiveEnabled = document.getElementById('adaptiveMode').checked;
+        }
         
         // Start monitoring
         document.getElementById('startMonitoring').onclick = () => {
@@ -1241,7 +1574,7 @@
             const gestureDetectionEnabled = conditions.some(c => c.includes('reset gesture'));
             
             if (ballTrackingEnabled) {
-                prompt += "1. Ball Detection: Is there a blue ball visible in the image? If yes, is it currently inside a cup or outside of any cup? Be very specific about the ball's location.\n\n";
+                prompt += "1. Ball Detection: Is there a ball visible in the image? If yes, is it currently inside the large white bucket or outside of the bucket? Look for a white bucket/container on the floor. Be very specific about whether the ball is IN the white bucket or NOT.\n\n";
             }
             
             if (gestureDetectionEnabled) {
@@ -1267,9 +1600,9 @@
             // Detect ball state
             let currentBallInCup = false;
             
-            if (lowerResult.includes('ball') && lowerResult.includes('inside') && lowerResult.includes('cup')) {
+            if (lowerResult.includes('ball') && (lowerResult.includes('inside') || lowerResult.includes('in')) && (lowerResult.includes('bucket') || lowerResult.includes('white'))) {
                 currentBallInCup = true;
-            } else if (lowerResult.includes('ball') && (lowerResult.includes('outside') || lowerResult.includes('not in') || lowerResult.includes('out of'))) {
+            } else if (lowerResult.includes('ball') && (lowerResult.includes('outside') || lowerResult.includes('not in') || lowerResult.includes('out of') || lowerResult.includes('not inside'))) {
                 currentBallInCup = false;
             }
             
@@ -1289,11 +1622,11 @@
                     ballState.isReady = false;
                     
                     updateBallDisplay(true);
-                    addLogEntry(`🎯 SCORE! Ball entered cup. Total score: ${ballState.score}`, 'success');
+                    addLogEntry(`🎯 SCORE! Robot placed ball in bucket! Total score: ${ballState.score}`, 'success');
                     updateStats();
                     
                     // Add to detection panel
-                    addDetection([`✅ Ball successfully placed in cup! Score: ${ballState.score}`]);
+                    addDetection([`✅ LeKiwi robot scored! Ball in bucket! Score: ${ballState.score}`]);
                 }
                 // Ball leaves cup (in → out)
                 else if (ballState.isInCup && !currentBallInCup) {
@@ -1302,7 +1635,7 @@
                     ballState.isReady = true;
                     
                     updateBallDisplay(false);
-                    addLogEntry('Ball removed from cup - ready for next placement', 'info');
+                    addLogEntry('Ball removed from bucket - ready for next robot attempt', 'info');
                 }
             } else {
                 // Initialize state
@@ -1335,17 +1668,17 @@
             if (isInCup) {
                 indicator.className = 'ball-indicator in-cup';
                 indicator.textContent = '✅';
-                statusText.textContent = 'IN CUP';
+                statusText.textContent = 'IN BUCKET';
                 statusText.style.color = '#4af542';
                 readyIndicator.className = 'ready-indicator not-ready';
-                readyIndicator.textContent = 'Scoring Complete - Remove ball to continue';
+                readyIndicator.textContent = 'Score! Waiting for ball removal...';
             } else {
                 indicator.className = 'ball-indicator out-cup';
-                indicator.textContent = '🔵';
-                statusText.textContent = 'OUT OF CUP';
+                indicator.textContent = '🏀';
+                statusText.textContent = 'NOT IN BUCKET';
                 statusText.style.color = '#ffaa00';
                 readyIndicator.className = 'ready-indicator ready';
-                readyIndicator.textContent = 'Ready for placement!';
+                readyIndicator.textContent = 'Ready for robot to score!';
             }
             
             if (ballState.lastTransitionTime) {

@@ -26,7 +26,8 @@ class DatabaseService {
       metrics: 'metrics',
       robot_states: 'robot_states',
       zones: 'zones',
-      configurations: 'configurations'
+      configurations: 'configurations',
+      frames: 'frames'
     };
     
     // Statistics
@@ -34,6 +35,7 @@ class DatabaseService {
       eventsStored: 0,
       alertsStored: 0,
       metricsStored: 0,
+      framesStored: 0,
       queriesExecuted: 0,
       errors: 0
     };
@@ -167,6 +169,23 @@ class DatabaseService {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(section)
+      )`,
+      
+      // Frames table
+      `CREATE TABLE IF NOT EXISTS ${this.tables.frames} (
+        id SERIAL PRIMARY KEY,
+        camera_id VARCHAR(50) NOT NULL,
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+        frame_data BYTEA NOT NULL,
+        format VARCHAR(20) NOT NULL,
+        width INTEGER NOT NULL,
+        height INTEGER NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        metadata JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_frames_camera (camera_id),
+        INDEX idx_frames_timestamp (timestamp),
+        INDEX idx_frames_camera_timestamp (camera_id, timestamp)
       )`
     ];
     
@@ -185,7 +204,10 @@ class DatabaseService {
       `CREATE INDEX IF NOT EXISTS idx_alerts_priority ON ${this.tables.alerts} (priority)`,
       `CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON ${this.tables.metrics} (timestamp)`,
       `CREATE INDEX IF NOT EXISTS idx_metrics_robot ON ${this.tables.metrics} (robot_id)`,
-      `CREATE INDEX IF NOT EXISTS idx_metrics_type ON ${this.tables.metrics} (metric_type)`
+      `CREATE INDEX IF NOT EXISTS idx_metrics_type ON ${this.tables.metrics} (metric_type)`,
+      `CREATE INDEX IF NOT EXISTS idx_frames_camera ON ${this.tables.frames} (camera_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_frames_timestamp ON ${this.tables.frames} (timestamp)`,
+      `CREATE INDEX IF NOT EXISTS idx_frames_camera_timestamp ON ${this.tables.frames} (camera_id, timestamp)`
     ];
     
     for (const query of pgQueries) {
@@ -730,6 +752,197 @@ class DatabaseService {
   }
 
   /**
+   * Save frame to database
+   */
+  async saveFrame(frameData) {
+    const query = `
+      INSERT INTO ${this.tables.frames}
+      (camera_id, timestamp, frame_data, format, width, height, size_bytes, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, camera_id, timestamp, format, width, height, size_bytes, metadata, created_at
+    `;
+    
+    const values = [
+      frameData.cameraId,
+      frameData.timestamp || new Date(),
+      frameData.data, // Buffer or binary data
+      frameData.format || 'jpeg',
+      frameData.width,
+      frameData.height,
+      frameData.sizeBytes || Buffer.byteLength(frameData.data),
+      JSON.stringify(frameData.metadata || {})
+    ];
+    
+    try {
+      const result = await this.pool.query(query, values);
+      this.stats.framesStored++;
+      // Return without the actual frame data to save memory
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Failed to save frame:', error);
+      this.stats.errors++;
+      throw error;
+    }
+  }
+
+  /**
+   * Get frames by time range
+   */
+  async getFramesByTimeRange(cameraId, startTime, endTime, options = {}) {
+    let query = `
+      SELECT id, camera_id, timestamp, format, width, height, size_bytes, metadata, created_at
+      ${options.includeData ? ', frame_data' : ''}
+      FROM ${this.tables.frames}
+      WHERE camera_id = $1
+        AND timestamp >= $2
+        AND timestamp <= $3
+      ORDER BY timestamp ${options.order || 'DESC'}
+    `;
+    
+    const values = [cameraId, startTime, endTime];
+    
+    if (options.limit) {
+      query += ` LIMIT $4`;
+      values.push(options.limit);
+      
+      if (options.offset) {
+        query += ` OFFSET $5`;
+        values.push(options.offset);
+      }
+    }
+    
+    try {
+      const result = await this.pool.query(query, values);
+      this.stats.queriesExecuted++;
+      return result.rows;
+    } catch (error) {
+      logger.error('Failed to get frames by time range:', error);
+      this.stats.errors++;
+      throw error;
+    }
+  }
+
+  /**
+   * Get frame by ID
+   */
+  async getFrameById(frameId, includeData = false) {
+    const query = `
+      SELECT id, camera_id, timestamp, format, width, height, size_bytes, metadata, created_at
+      ${includeData ? ', frame_data' : ''}
+      FROM ${this.tables.frames}
+      WHERE id = $1
+    `;
+    
+    try {
+      const result = await this.pool.query(query, [frameId]);
+      this.stats.queriesExecuted++;
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Failed to get frame:', error);
+      this.stats.errors++;
+      throw error;
+    }
+  }
+
+  /**
+   * Get latest frame for camera
+   */
+  async getLatestFrame(cameraId, includeData = false) {
+    const query = `
+      SELECT id, camera_id, timestamp, format, width, height, size_bytes, metadata, created_at
+      ${includeData ? ', frame_data' : ''}
+      FROM ${this.tables.frames}
+      WHERE camera_id = $1
+      ORDER BY timestamp DESC
+      LIMIT 1
+    `;
+    
+    try {
+      const result = await this.pool.query(query, [cameraId]);
+      this.stats.queriesExecuted++;
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Failed to get latest frame:', error);
+      this.stats.errors++;
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up old frames
+   */
+  async cleanupOldFrames(retentionHours = 24) {
+    const cutoffDate = new Date();
+    cutoffDate.setHours(cutoffDate.getHours() - retentionHours);
+    
+    const query = `
+      DELETE FROM ${this.tables.frames}
+      WHERE timestamp < $1
+      RETURNING id, camera_id, size_bytes
+    `;
+    
+    try {
+      const result = await this.pool.query(query, [cutoffDate]);
+      const deletedFrames = result.rows;
+      const totalSizeFreed = deletedFrames.reduce((sum, frame) => sum + frame.size_bytes, 0);
+      
+      logger.info(`Cleaned up ${deletedFrames.length} old frames, freed ${totalSizeFreed} bytes`);
+      
+      return {
+        framesDeleted: deletedFrames.length,
+        bytesFreed: totalSizeFreed,
+        framesByCamera: deletedFrames.reduce((acc, frame) => {
+          acc[frame.camera_id] = (acc[frame.camera_id] || 0) + 1;
+          return acc;
+        }, {})
+      };
+    } catch (error) {
+      logger.error('Failed to cleanup old frames:', error);
+      this.stats.errors++;
+      throw error;
+    }
+  }
+
+  /**
+   * Get frame statistics
+   */
+  async getFrameStats(cameraId = null, periodHours = 24) {
+    const sinceDate = new Date();
+    sinceDate.setHours(sinceDate.getHours() - periodHours);
+    
+    let query = `
+      SELECT
+        camera_id,
+        COUNT(*) as frame_count,
+        SUM(size_bytes) as total_size,
+        AVG(size_bytes) as avg_size,
+        MIN(timestamp) as earliest_frame,
+        MAX(timestamp) as latest_frame
+      FROM ${this.tables.frames}
+      WHERE timestamp >= $1
+    `;
+    
+    const values = [sinceDate];
+    
+    if (cameraId) {
+      query += ` AND camera_id = $2`;
+      values.push(cameraId);
+    }
+    
+    query += ` GROUP BY camera_id`;
+    
+    try {
+      const result = await this.pool.query(query, values);
+      this.stats.queriesExecuted++;
+      return result.rows;
+    } catch (error) {
+      logger.error('Failed to get frame stats:', error);
+      this.stats.errors++;
+      throw error;
+    }
+  }
+
+  /**
    * Clean up old data
    */
   async cleanupOldData(retentionDays = 30) {
@@ -748,6 +961,10 @@ class DatabaseService {
       {
         name: 'metrics',
         query: `DELETE FROM ${this.tables.metrics} WHERE created_at < $1`
+      },
+      {
+        name: 'frames',
+        query: `DELETE FROM ${this.tables.frames} WHERE created_at < $1`
       }
     ];
     
@@ -777,7 +994,9 @@ class DatabaseService {
       metricCount: `SELECT COUNT(*) as count FROM ${this.tables.metrics}`,
       robotCount: `SELECT COUNT(*) as count FROM ${this.tables.robot_states}`,
       zoneCount: `SELECT COUNT(*) as count FROM ${this.tables.zones}`,
-      recentEvents: `SELECT COUNT(*) as count FROM ${this.tables.events} WHERE created_at > NOW() - INTERVAL '1 hour'`
+      frameCount: `SELECT COUNT(*) as count FROM ${this.tables.frames}`,
+      recentEvents: `SELECT COUNT(*) as count FROM ${this.tables.events} WHERE created_at > NOW() - INTERVAL '1 hour'`,
+      recentFrames: `SELECT COUNT(*) as count FROM ${this.tables.frames} WHERE created_at > NOW() - INTERVAL '1 hour'`
     };
     
     const stats = { ...this.stats };

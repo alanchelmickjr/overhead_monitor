@@ -1,0 +1,26 @@
+# ngrok configuration for LeKiwi Robot Nanny Cam
+version: "2"
+authtoken: 32ipFmxLQwKp5I7UdGYFgenl54X_miTjKnXQ4LuswLf23muX
+
+# Agent configuration
+web_addr: 127.0.0.1:4040
+console_ui: false
+log_level: info
+region: us
+
+# Tunnel configurations
+tunnels:
+  camera-viewer:
+    proto: http
+    addr: 3000
+    inspect: false
+    
+  robot-monitor:
+    proto: http
+    addr: 3001
+    inspect: false
+    
+  llava-api:
+    proto: http
+    addr: 8080
+    inspect: false

@@ -2,14 +2,17 @@
 
 /**
  * Multi-Client RTSP to Browser Proxy Server
- * Actually supports multiple simultaneous viewers (novel concept!)
+ * Enhanced with frame capture and buffering for AI analysis and multi-operator support
  */
 
 const express = require('express');
-const { spawn } = require('child_process');
 const cors = require('cors');
 const fs = require('fs');
 require('dotenv').config();
+
+// Import frame capture components
+const FrameCaptureService = require('./src/camera/FrameCaptureService');
+const FrameBufferManager = require('./src/camera/FrameBufferManager');
 
 const app = express();
 const PORT = process.env.RTSP_PROXY_PORT || 3001;
@@ -28,11 +31,18 @@ try {
     log('Error loading config.json', 'WARNING');
 }
 
-// Stream management
-let ffmpegProcess = null;
-let clients = new Set();
-let frameBuffer = [];
-const MAX_BUFFER_SIZE = 30; // Keep last 30 frames for late joiners
+// Initialize frame capture components
+const frameCaptureService = new FrameCaptureService();
+const frameBufferManager = new FrameBufferManager({
+    defaultBufferSize: 100, // Keep last 100 frames per camera
+    maxBufferMemory: 200 * 1024 * 1024 // 200MB max memory
+});
+
+// Client management
+let clients = new Map(); // Map of clientId -> response object
+let cameraActive = false;
+const CAMERA_ID = 'main-camera';
+const RTSP_URL = 'rtsp://LeKiwi:LeKiwi995@192.168.88.40:554/stream1';
 
 // Logging with timestamps
 function log(message, level = 'INFO') {
@@ -48,151 +58,66 @@ function log(message, level = 'INFO') {
     console.log(`${color}[${timestamp}] [${level}] ${message}\x1b[0m`);
 }
 
-// Start FFmpeg process (shared by all clients)
-function startFFmpeg() {
-    if (ffmpegProcess) {
-        log('FFmpeg already running', 'DEBUG');
+// Start frame capture (shared by all clients)
+async function startFrameCapture() {
+    if (cameraActive) {
+        log('Frame capture already running', 'DEBUG');
         return;
     }
     
-    const rtspUrl = 'rtsp://LeKiwi:LeKiwi995@192.168.88.40:554/stream1';
-    log(`🎥 Starting shared FFmpeg stream from: ${rtspUrl}`, 'SUCCESS');
+    log(`🎥 Starting frame capture from: ${RTSP_URL}`, 'SUCCESS');
     
-    const ffmpegArgs = [
-        '-rtsp_transport', 'tcp',
-        '-i', rtspUrl,
-        '-f', 'mjpeg',
-        '-q:v', '5',
-        '-r', '15',
-        '-s', '1280x720',
-        'pipe:1'
-    ];
-    
-    ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
-    
-    let tempBuffer = Buffer.alloc(0);
-    let frameCount = 0;
-    
-    ffmpegProcess.stdout.on('data', (chunk) => {
-        tempBuffer = Buffer.concat([tempBuffer, chunk]);
-        
-        // Look for JPEG frames
-        let startIndex = tempBuffer.indexOf(Buffer.from([0xFF, 0xD8]));
-        let endIndex = tempBuffer.indexOf(Buffer.from([0xFF, 0xD9]));
-        
-        while (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-            const frame = tempBuffer.slice(startIndex, endIndex + 2);
-            
-            // Buffer frame for late joiners
-            frameBuffer.push(frame);
-            if (frameBuffer.length > MAX_BUFFER_SIZE) {
-                frameBuffer.shift();
-            }
-            
-            // Send to all connected clients
-            const boundary = Buffer.from(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`);
-            const frameData = Buffer.concat([boundary, frame, Buffer.from('\r\n')]);
-            
-            // Send to all connected clients with proper cleanup
-            const clientsToRemove = new Set();
-            for (const client of clients) {
-                try {
-                    if (client.destroyed || client.finished || !client.writable) {
-                        clientsToRemove.add(client);
-                        continue;
-                    }
-                    client.write(frameData);
-                } catch (err) {
-                    log(`Client write error: ${err.message}`, 'DEBUG');
-                    clientsToRemove.add(client);
-                }
-            }
-            
-            // Clean up dead clients
-            for (const deadClient of clientsToRemove) {
-                clients.delete(deadClient);
-                try {
-                    if (!deadClient.destroyed) {
-                        deadClient.destroy();
-                    }
-                } catch (err) {
-                    // Already destroyed
-                }
-            }
-            
-            if (clientsToRemove.size > 0) {
-                log(`Cleaned up ${clientsToRemove.size} dead clients (Remaining: ${clients.size})`, 'DEBUG');
-            }
-            
-            frameCount++;
-            if (frameCount % 100 === 0) {
-                log(`Streamed ${frameCount} frames to ${clients.size} clients`, 'DEBUG');
-            }
-            
-            tempBuffer = tempBuffer.slice(endIndex + 2);
-            startIndex = tempBuffer.indexOf(Buffer.from([0xFF, 0xD8]));
-            endIndex = tempBuffer.indexOf(Buffer.from([0xFF, 0xD9]));
-        }
+    // Initialize buffer for camera
+    frameBufferManager.initializeBuffer(CAMERA_ID, {
+        bufferSize: 100
     });
     
-    ffmpegProcess.stderr.on('data', (data) => {
-        const message = data.toString();
-        if (message.includes('error') || message.includes('Error')) {
-            log(`FFmpeg error: ${message}`, 'ERROR');
-        }
-    });
-    
-    ffmpegProcess.on('close', (code) => {
-        log(`FFmpeg process ended with code ${code}`, code === 0 ? 'INFO' : 'ERROR');
-        ffmpegProcess = null;
-        frameBuffer = [];
+    // Start capturing frames
+    try {
+        await frameCaptureService.startCapture({
+            cameraId: CAMERA_ID,
+            url: RTSP_URL,
+            ffmpegOptions: {
+                fps: 15,
+                resolution: '1280x720',
+                quality: 5
+            },
+            metadata: {
+                source: 'rtsp-proxy',
+                location: 'overhead'
+            }
+        });
         
-        // Restart if clients still connected
-        if (clients.size > 0) {
-            log('Restarting FFmpeg for connected clients...', 'INFO');
-            setTimeout(startFFmpeg, 1000);
-        }
-    });
+        cameraActive = true;
+        log('Frame capture started successfully', 'SUCCESS');
+    } catch (error) {
+        log(`Failed to start frame capture: ${error.message}`, 'ERROR');
+        cameraActive = false;
+        throw error;
+    }
 }
 
-// Stop FFmpeg if no clients (with cleanup)
-function stopFFmpegIfNoClients() {
-    // Clean up any remaining dead clients first
-    const deadClients = [];
-    for (const client of clients) {
-        if (client.destroyed || client.finished || !client.writable) {
-            deadClients.push(client);
+// Stop frame capture if no clients
+async function stopFrameCaptureIfNoClients() {
+    // Clean up disconnected clients
+    for (const [clientId, res] of clients) {
+        if (res.destroyed || res.finished || !res.writable) {
+            clients.delete(clientId);
+            frameBufferManager.unsubscribe(clientId);
         }
     }
     
-    for (const deadClient of deadClients) {
-        clients.delete(deadClient);
-    }
-    
-    if (deadClients.length > 0) {
-        log(`Cleaned up ${deadClients.length} dead clients during FFmpeg check`, 'DEBUG');
-    }
-    
-    if (clients.size === 0 && ffmpegProcess) {
-        log('No clients connected, stopping FFmpeg', 'INFO');
-        try {
-            ffmpegProcess.kill('SIGTERM');
-            setTimeout(() => {
-                if (ffmpegProcess && !ffmpegProcess.killed) {
-                    ffmpegProcess.kill('SIGKILL');
-                }
-            }, 5000);
-        } catch (err) {
-            log(`Error stopping FFmpeg: ${err.message}`, 'ERROR');
-        }
-        ffmpegProcess = null;
-        frameBuffer = [];
+    if (clients.size === 0 && cameraActive) {
+        log('No clients connected, stopping frame capture', 'INFO');
+        await frameCaptureService.stopCapture(CAMERA_ID);
+        frameBufferManager.clearBuffer(CAMERA_ID);
+        cameraActive = false;
     }
 }
 
 // MJPEG streaming endpoint
 app.get('/stream.mjpeg', (req, res) => {
-    const clientId = `${req.ip}-${Date.now()}`;
+    const clientId = `client-${req.ip}-${Date.now()}`;
     log(`📹 New client connected: ${clientId} (Total: ${clients.size + 1})`, 'INFO');
     
     res.writeHead(200, {
@@ -202,31 +127,47 @@ app.get('/stream.mjpeg', (req, res) => {
         'Pragma': 'no-cache'
     });
     
-    // Add client to set
-    clients.add(res);
+    // Add client to map
+    clients.set(clientId, res);
     
-    // Send buffered frames to new client
-    if (frameBuffer.length > 0) {
-        log(`Sending ${frameBuffer.length} buffered frames to new client`, 'DEBUG');
-        for (const frame of frameBuffer) {
-            const boundary = Buffer.from(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`);
-            const frameData = Buffer.concat([boundary, frame, Buffer.from('\r\n')]);
-            res.write(frameData);
+    // Subscribe to frame buffer
+    const subscription = frameBufferManager.subscribe({
+        subscriberId: clientId,
+        cameraIds: [CAMERA_ID],
+        mode: 'both', // Get both live and buffered frames
+        bufferReplayCount: 30, // Send last 30 frames to new client
+        callback: (frame) => {
+            try {
+                if (!res.writable || res.destroyed || res.finished) {
+                    return;
+                }
+                
+                const boundary = `--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.data.length}\r\n\r\n`;
+                res.write(Buffer.from(boundary));
+                res.write(frame.data);
+                res.write(Buffer.from('\r\n'));
+            } catch (error) {
+                log(`Error writing frame to client ${clientId}: ${error.message}`, 'DEBUG');
+            }
         }
+    });
+    
+    // Start frame capture if needed
+    if (!cameraActive) {
+        startFrameCapture().catch(error => {
+            log(`Failed to start capture: ${error.message}`, 'ERROR');
+            res.status(500).send('Failed to start camera');
+        });
     }
     
-    // Start FFmpeg if needed
-    if (!ffmpegProcess) {
-        startFFmpeg();
-    }
-    
-    // Handle all possible disconnect scenarios
-    const cleanupClient = () => {
-        if (clients.has(res)) {
-            clients.delete(res);
+    // Handle client disconnect
+    const cleanup = () => {
+        if (clients.has(clientId)) {
+            clients.delete(clientId);
+            frameBufferManager.unsubscribe(clientId);
             log(`Client disconnected: ${clientId} (Remaining: ${clients.size})`, 'INFO');
             
-            // Ensure response is properly closed
+            // Try to end response properly
             try {
                 if (!res.destroyed && !res.finished) {
                     res.end();
@@ -235,43 +176,48 @@ app.get('/stream.mjpeg', (req, res) => {
                 // Already closed
             }
             
-            // Delay stopping FFmpeg to handle quick reconnects
-            setTimeout(stopFFmpegIfNoClients, 5000);
+            // Delay stopping frame capture to handle quick reconnects
+            setTimeout(stopFrameCaptureIfNoClients, 5000);
         }
     };
     
-    // Multiple disconnect event handlers
-    req.on('close', cleanupClient);
-    req.on('aborted', cleanupClient);
-    res.on('close', cleanupClient);
+    // Multiple disconnect handlers for reliability
+    req.on('close', cleanup);
+    req.on('aborted', cleanup);
+    res.on('close', cleanup);
     res.on('error', (err) => {
         log(`Client response error: ${err.message}`, 'DEBUG');
-        cleanupClient();
+        cleanup();
     });
-    res.on('finish', cleanupClient);
+    res.on('finish', cleanup);
 });
 
 // Snapshot endpoint
 app.get('/snapshot.jpg', async (req, res) => {
     log('📸 Snapshot requested', 'INFO');
     
-    if (frameBuffer.length > 0) {
-        // Use last frame from buffer
-        const lastFrame = frameBuffer[frameBuffer.length - 1];
+    // Try to get latest frame from buffer
+    const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
+    
+    if (latestFrame && latestFrame.data) {
+        // Use buffered frame
         res.writeHead(200, {
             'Content-Type': 'image/jpeg',
-            'Content-Length': lastFrame.length,
-            'Cache-Control': 'no-cache'
+            'Content-Length': latestFrame.data.length,
+            'Cache-Control': 'no-cache',
+            'X-Frame-Timestamp': latestFrame.timestamp,
+            'X-Frame-Sequence': latestFrame.sequenceNumber
         });
-        res.end(lastFrame);
+        res.end(latestFrame.data);
         log('✅ Snapshot delivered from buffer', 'SUCCESS');
     } else {
-        // Capture fresh frame
-        const rtspUrl = 'rtsp://LeKiwi:LeKiwi995@192.168.88.40:554/stream1';
+        // No buffered frames, capture fresh one
+        log('No buffered frames, capturing fresh snapshot', 'INFO');
         
+        const { spawn } = require('child_process');
         const ffmpeg = spawn('ffmpeg', [
             '-rtsp_transport', 'tcp',
-            '-i', rtspUrl,
+            '-i', RTSP_URL,
             '-vframes', '1',
             '-f', 'image2',
             '-vcodec', 'mjpeg',
@@ -353,74 +299,172 @@ app.post('/analyze', async (req, res) => {
 
 // Status endpoint
 app.get('/status', (req, res) => {
+    const captureStatus = frameCaptureService.getCaptureStatus(CAMERA_ID);
+    const bufferStats = frameBufferManager.getBufferStats(CAMERA_ID);
+    
     res.json({
         running: true,
-        ffmpegActive: ffmpegProcess !== null,
+        ffmpegActive: cameraActive && captureStatus.isCapturing,
         clientCount: clients.size,
-        bufferedFrames: frameBuffer.length,
+        frameCapture: captureStatus,
+        bufferStats: bufferStats,
+        memory: frameBufferManager.getStatistics(),
         uptime: process.uptime()
+    });
+});
+
+// Buffer statistics endpoint
+app.get('/buffer-stats', (req, res) => {
+    const stats = frameBufferManager.getStatistics();
+    res.json(stats);
+});
+
+// Frame history endpoint
+app.get('/frames/:count?', (req, res) => {
+    const count = parseInt(req.params.count) || 10;
+    const frames = frameBufferManager.getFrames(CAMERA_ID, count, true);
+    
+    res.json({
+        count: frames.length,
+        frames: frames.map(f => ({
+            id: f.id,
+            timestamp: f.timestamp,
+            sequenceNumber: f.sequenceNumber,
+            size: f.data.length,
+            metadata: f.metadata
+        }))
     });
 });
 
 // Root endpoint
 app.get('/', (req, res) => {
+    const stats = frameBufferManager.getStatistics();
+    const captureStatus = frameCaptureService.getCaptureStatus(CAMERA_ID);
+    
     res.send(`
         <html>
-        <head><title>Multi-Client RTSP Proxy</title></head>
+        <head><title>Enhanced Multi-Client RTSP Proxy</title></head>
         <body style="font-family: monospace; padding: 20px; background: #1a1a1a; color: #e0e0e0;">
-            <h1>🎥 Multi-Client RTSP Proxy Server</h1>
+            <h1>🎥 Enhanced RTSP Proxy with AI Support</h1>
             <p>Port: ${PORT}</p>
             <p style="color: #4a9eff;">Connected Clients: ${clients.size}</p>
-            <p style="color: #4a9eff;">FFmpeg Status: ${ffmpegProcess ? '🟢 Running' : '🔴 Stopped'}</p>
+            <p style="color: #4a9eff;">Frame Capture: ${captureStatus.isCapturing ? '🟢 Running' : '🔴 Stopped'}</p>
+            <p style="color: #4a9eff;">Frames Captured: ${captureStatus.framesProcessed}</p>
+            <p style="color: #4a9eff;">Buffer Memory: ${(stats.totalMemoryUsage / 1024 / 1024).toFixed(2)} MB</p>
+            
             <h2>Available Endpoints:</h2>
             <ul>
                 <li><a href="/stream.mjpeg" style="color: #4a9eff;">MJPEG Stream</a> - /stream.mjpeg</li>
                 <li><a href="/snapshot.jpg" style="color: #4a9eff;">Snapshot</a> - /snapshot.jpg</li>
                 <li><a href="/status" style="color: #4a9eff;">Status</a> - /status</li>
+                <li><a href="/buffer-stats" style="color: #4a9eff;">Buffer Statistics</a> - /buffer-stats</li>
+                <li><a href="/frames/30" style="color: #4a9eff;">Frame History</a> - /frames/:count</li>
             </ul>
-            <h2>Features:</h2>
+            
+            <h2>Enhanced Features:</h2>
             <ul style="color: #4af542;">
-                <li>✅ Supports multiple simultaneous clients</li>
-                <li>✅ Shared FFmpeg process (efficient)</li>
-                <li>✅ Frame buffering for late joiners</li>
-                <li>✅ Automatic restart on failure</li>
-                <li>✅ Won't die when ngrok gets hammered!</li>
+                <li>✅ Advanced frame capture and buffering</li>
+                <li>✅ AI-ready frame distribution</li>
+                <li>✅ Memory-efficient circular buffers</li>
+                <li>✅ Multi-client subscription model</li>
+                <li>✅ Frame history and replay</li>
+                <li>✅ Performance monitoring</li>
+                <li>✅ Automatic resource management</li>
             </ul>
         </body>
         </html>
     `);
 });
 
-// Check for FFmpeg
-const checkFFmpeg = spawn('ffmpeg', ['-version']);
-checkFFmpeg.on('error', () => {
-    log('❌ FFmpeg not found! Please install FFmpeg', 'ERROR');
-    process.exit(1);
+// Initialize frame capture service event handlers
+frameCaptureService.on('frame', (frame) => {
+    // Add frame to buffer manager
+    frameBufferManager.addFrame(frame);
 });
 
-checkFFmpeg.on('close', (code) => {
-    if (code === 0) {
-        log('✅ FFmpeg is installed', 'SUCCESS');
-        
-        // Start server
-        app.listen(PORT, () => {
-            log('═══════════════════════════════════════════', 'INFO');
-            log(`🚀 Multi-Client RTSP Proxy Server on port ${PORT}`, 'SUCCESS');
-            log('═══════════════════════════════════════════', 'INFO');
-            log('', 'INFO');
-            log('✨ Features:', 'INFO');
-            log('   • Supports unlimited simultaneous viewers', 'INFO');
-            log('   • Shared FFmpeg process (CPU efficient)', 'INFO');
-            log('   • Frame buffering for smooth playback', 'INFO');
-            log('   • Auto-restart on failures', 'INFO');
-            log('   • Ready for ngrok exposure!', 'INFO');
-            log('', 'INFO');
-            log('🌐 Access Points:', 'INFO');
-            log(`   Web Interface: http://localhost:${PORT}`, 'INFO');
-            log(`   MJPEG Stream:  http://localhost:${PORT}/stream.mjpeg`, 'INFO');
-            log(`   Snapshot:      http://localhost:${PORT}/snapshot.jpg`, 'INFO');
-            log('', 'INFO');
-            log('═══════════════════════════════════════════', 'INFO');
-        });
+frameCaptureService.on('error', (error) => {
+    log(`Frame capture error for ${error.cameraId}: ${error.error.message}`, 'ERROR');
+});
+
+frameCaptureService.on('capture-ended', async (event) => {
+    log(`Capture ended for ${event.cameraId} with code ${event.code}`, 'WARNING');
+    cameraActive = false;
+    
+    // Try to restart if clients are still connected
+    if (clients.size > 0 && event.code !== 0) {
+        log('Attempting to restart capture for connected clients...', 'INFO');
+        setTimeout(() => {
+            startFrameCapture().catch(err => {
+                log(`Failed to restart capture: ${err.message}`, 'ERROR');
+            });
+        }, 3000);
     }
+});
+
+// Check for FFmpeg availability
+(async () => {
+    const ffmpegAvailable = await FrameCaptureService.checkFFmpegAvailable();
+    
+    if (!ffmpegAvailable) {
+        log('❌ FFmpeg not found! Please install FFmpeg', 'ERROR');
+        process.exit(1);
+    }
+    
+    log('✅ FFmpeg is installed', 'SUCCESS');
+    
+    // Start server
+    app.listen(PORT, () => {
+        log('═══════════════════════════════════════════', 'INFO');
+        log(`🚀 Enhanced RTSP Proxy Server on port ${PORT}`, 'SUCCESS');
+        log('═══════════════════════════════════════════', 'INFO');
+        log('', 'INFO');
+        log('✨ Enhanced Features:', 'INFO');
+        log('   • AI-ready frame capture and distribution', 'INFO');
+        log('   • Advanced frame buffering and management', 'INFO');
+        log('   • Multi-operator support with subscriptions', 'INFO');
+        log('   • Memory-efficient circular buffers', 'INFO');
+        log('   • Frame history and replay capabilities', 'INFO');
+        log('   • Performance monitoring and statistics', 'INFO');
+        log('', 'INFO');
+        log('🌐 Access Points:', 'INFO');
+        log(`   Web Interface: http://localhost:${PORT}`, 'INFO');
+        log(`   MJPEG Stream:  http://localhost:${PORT}/stream.mjpeg`, 'INFO');
+        log(`   Snapshot:      http://localhost:${PORT}/snapshot.jpg`, 'INFO');
+        log('', 'INFO');
+        log('═══════════════════════════════════════════', 'INFO');
+    });
+})();
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+    log('\nShutting down gracefully...', 'INFO');
+    
+    // Stop all captures
+    await frameCaptureService.stopAll();
+    
+    // Clear all buffers
+    frameBufferManager.destroy();
+    
+    // Close all client connections
+    for (const [clientId, res] of clients) {
+        try {
+            if (!res.destroyed && !res.finished) {
+                res.end();
+            }
+        } catch (err) {
+            // Ignore errors during shutdown
+        }
+    }
+    
+    process.exit(0);
+});
+
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+    log(`Uncaught exception: ${error.message}`, 'ERROR');
+    console.error(error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    log(`Unhandled rejection at: ${promise}, reason: ${reason}`, 'ERROR');
 });

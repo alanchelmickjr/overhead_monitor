@@ -2,6 +2,9 @@
  * Robot Overhead Monitor - Dashboard Application
  */
 
+// Import frame handler
+let frameHandler = null;
+
 // WebSocket connection
 let socket = null;
 let isConnected = false;
@@ -11,6 +14,12 @@ let currentCameraId = null;
 let currentInterval = 500;
 let isMonitoring = false;
 let selectedAlertId = null;
+let streamingMode = 'live'; // 'live', 'buffered', 'both'
+let frameSubscription = null;
+
+// Performance monitoring
+let connectionQuality = 'good'; // 'good', 'medium', 'poor'
+let adaptiveStreamingEnabled = true;
 
 // DOM elements
 const elements = {
@@ -89,7 +98,17 @@ const elements = {
     acknowledgeAlert: document.getElementById('acknowledgeAlert'),
     
     // Audio
-    alertSound: document.getElementById('alertSound')
+    alertSound: document.getElementById('alertSound'),
+    
+    // Frame buffer controls (to be added dynamically)
+    streamModeSelect: null,
+    bufferSizeDisplay: null,
+    bufferUtilization: null,
+    frameRateDisplay: null,
+    connectionQuality: null,
+    adaptiveToggle: null,
+    bufferReplayBtn: null,
+    bufferClearBtn: null
 };
 
 // Canvas context
@@ -102,6 +121,9 @@ let currentFps = 0;
 
 // Initialize application
 function init() {
+    // Initialize frame handler
+    initializeFrameHandler();
+    
     setupWebSocket();
     setupEventListeners();
     startClock();
@@ -151,12 +173,15 @@ function setupWebSocket() {
     
     // Real-time updates
     socket.on('frame', handleFrame);
+    socket.on('frame_buffered', handleBufferedFrame);
+    socket.on('buffer_stats', handleBufferStats);
     socket.on('event_detected', handleEvent);
     socket.on('alert', handleAlert);
     socket.on('alert_notification', handleAlertNotification);
     socket.on('robot_status', handleRobotStatus);
     socket.on('system_status', handleSystemStatus);
     socket.on('camera_status', handleCameraStatus);
+    socket.on('connection_quality', handleConnectionQuality);
     
     // Response handlers
     socket.on('subscribed', (data) => {
@@ -181,6 +206,11 @@ function setupWebSocket() {
     socket.on('status', handleStatusUpdate);
     socket.on('events', handleEventsList);
     socket.on('metrics', handleMetrics);
+    
+    // Frame subscription responses
+    socket.on('frame_subscription_success', handleFrameSubscriptionSuccess);
+    socket.on('frame_subscription_error', handleFrameSubscriptionError);
+    socket.on('frame_history', handleFrameHistory);
 }
 
 // Setup event listeners
@@ -334,12 +364,50 @@ function selectCamera(cameraId) {
     const cameraName = cameraItem ? cameraItem.querySelector('span').textContent : cameraId;
     elements.cameraTitle.textContent = cameraName;
     
-    // Subscribe to camera feed
-    socket.emit('subscribe', { feed: 'live', cameraId: cameraId });
+    // Subscribe to camera feed with current mode
+    subscribeToFrames(cameraId);
     
     // Show video canvas
     elements.videoCanvas.style.display = 'block';
     elements.noFeed.style.display = 'none';
+}
+
+// Subscribe to frames with specified mode
+function subscribeToFrames(cameraId, mode = streamingMode) {
+    if (frameSubscription) {
+        // Unsubscribe from previous subscription
+        socket.emit('unsubscribe_frames', {
+            subscriberId: frameSubscription.subscriberId
+        });
+    }
+    
+    // Create new subscription
+    const subscriberId = `dashboard-${Date.now()}`;
+    const subscription = {
+        subscriberId,
+        cameraIds: [cameraId],
+        mode: mode,
+        bufferReplayCount: mode === 'buffered' || mode === 'both' ? 10 : 0
+    };
+    
+    socket.emit('subscribe_frames', subscription);
+    frameSubscription = { ...subscription };
+    
+    // Update UI to show current mode
+    updateStreamingModeUI(mode);
+}
+
+// Update streaming mode UI
+function updateStreamingModeUI(mode) {
+    if (elements.streamModeSelect) {
+        elements.streamModeSelect.value = mode;
+    }
+    
+    // Show/hide buffer controls based on mode
+    const bufferControls = document.querySelector('.buffer-controls');
+    if (bufferControls) {
+        bufferControls.style.display = (mode === 'buffered' || mode === 'both') ? 'block' : 'none';
+    }
 }
 
 // Start monitoring
@@ -391,9 +459,53 @@ function captureSnapshot() {
     socket.emit('request_snapshot', { cameraId: currentCameraId });
 }
 
-// Handle frame
+// Initialize frame handler
+function initializeFrameHandler() {
+    if (typeof FrameHandler === 'undefined') {
+        console.warn('FrameHandler not loaded, using fallback mode');
+        return;
+    }
+    
+    frameHandler = new FrameHandler({
+        displayElement: elements.videoCanvas,
+        canvasElement: elements.videoCanvas,
+        mode: 'websocket',
+        maxBufferSize: 30,
+        targetFPS: 30,
+        smoothTransitions: true,
+        onFrameDisplayed: (frame) => {
+            // Update frame count
+            frameCount++;
+        },
+        onPerformanceUpdate: (metrics) => {
+            // Update performance displays
+            updatePerformanceMetrics(metrics);
+        },
+        onModeChange: (mode) => {
+            console.log('Frame handler mode changed to:', mode);
+        }
+    });
+}
+
+// Handle frame (both live and buffered)
 function handleFrame(data) {
     if (data.cameraId !== currentCameraId) return;
+    
+    // If using frame handler, add to buffer
+    if (frameHandler && streamingMode !== 'mjpeg') {
+        frameHandler.addWebSocketFrame(data);
+        
+        // Update latency metric
+        const latency = Date.now() - new Date(data.timestamp).getTime();
+        elements.latency.textContent = Math.max(0, latency);
+        
+        // Adaptive streaming
+        if (adaptiveStreamingEnabled) {
+            adaptStreamingQuality(latency);
+        }
+        
+        return;
+    }
     
     // Create image from base64
     const img = new Image();
@@ -435,6 +547,135 @@ function handleFrame(data) {
     // Calculate latency
     const latency = Date.now() - new Date(data.timestamp).getTime();
     elements.latency.textContent = Math.max(0, latency);
+}
+
+// Handle buffered frame
+function handleBufferedFrame(data) {
+    if (frameHandler && (streamingMode === 'buffered' || streamingMode === 'both')) {
+        frameHandler.addWebSocketFrame({ ...data, isBuffered: true });
+    }
+}
+
+// Handle buffer statistics
+function handleBufferStats(stats) {
+    if (!stats.cameras || !stats.cameras[currentCameraId]) return;
+    
+    const cameraStats = stats.cameras[currentCameraId];
+    
+    // Update buffer displays
+    if (elements.bufferSizeDisplay) {
+        elements.bufferSizeDisplay.textContent = `${cameraStats.currentFrames}/${cameraStats.bufferSize}`;
+    }
+    
+    if (elements.bufferUtilization) {
+        const utilization = (cameraStats.currentFrames / cameraStats.bufferSize) * 100;
+        elements.bufferUtilization.textContent = `${utilization.toFixed(1)}%`;
+    }
+    
+    // Update memory usage
+    const memoryMB = (cameraStats.memoryUsage / (1024 * 1024)).toFixed(2);
+    const totalMemoryMB = (stats.totalMemoryUsage / (1024 * 1024)).toFixed(2);
+    
+    const memoryDisplay = document.getElementById('bufferMemoryUsage');
+    if (memoryDisplay) {
+        memoryDisplay.textContent = `${memoryMB} MB / ${totalMemoryMB} MB total`;
+    }
+}
+
+// Handle connection quality update
+function handleConnectionQuality(data) {
+    connectionQuality = data.quality;
+    
+    if (elements.connectionQuality) {
+        elements.connectionQuality.textContent = connectionQuality;
+        elements.connectionQuality.className = `quality-indicator quality-${connectionQuality}`;
+    }
+    
+    // Auto-adjust streaming if enabled
+    if (adaptiveStreamingEnabled && frameHandler) {
+        switch (connectionQuality) {
+            case 'poor':
+                frameHandler.setTargetFPS(10);
+                if (streamingMode === 'live') {
+                    subscribeToFrames(currentCameraId, 'buffered');
+                }
+                break;
+            case 'medium':
+                frameHandler.setTargetFPS(20);
+                break;
+            case 'good':
+                frameHandler.setTargetFPS(30);
+                if (streamingMode === 'buffered') {
+                    subscribeToFrames(currentCameraId, 'live');
+                }
+                break;
+        }
+    }
+}
+
+// Adaptive streaming based on latency
+function adaptStreamingQuality(latency) {
+    let newQuality = 'good';
+    
+    if (latency > 500) {
+        newQuality = 'poor';
+    } else if (latency > 200) {
+        newQuality = 'medium';
+    }
+    
+    if (newQuality !== connectionQuality) {
+        handleConnectionQuality({ quality: newQuality });
+    }
+}
+
+// Handle frame subscription success
+function handleFrameSubscriptionSuccess(data) {
+    console.log('Frame subscription successful:', data);
+    showNotification(`Subscribed to ${data.mode} frames`, 'success');
+}
+
+// Handle frame subscription error
+function handleFrameSubscriptionError(error) {
+    console.error('Frame subscription error:', error);
+    showNotification(`Failed to subscribe: ${error.message}`, 'error');
+}
+
+// Handle frame history
+function handleFrameHistory(data) {
+    console.log(`Received ${data.frames.length} historical frames`);
+    
+    if (frameHandler && data.frames.length > 0) {
+        // Add historical frames to buffer
+        data.frames.forEach(frame => {
+            frameHandler.addWebSocketFrame({ ...frame, isHistorical: true });
+        });
+        
+        showNotification(`Loaded ${data.frames.length} buffered frames`, 'info');
+    }
+}
+
+// Update performance metrics display
+function updatePerformanceMetrics(metrics) {
+    // Update FPS
+    elements.fps.textContent = metrics.fps;
+    
+    // Update frame rate display
+    if (elements.frameRateDisplay) {
+        elements.frameRateDisplay.textContent = `${metrics.fps} FPS`;
+    }
+    
+    // Update buffer status for frame handler
+    if (frameHandler) {
+        const bufferStatus = frameHandler.getBufferStatus();
+        
+        if (elements.bufferSizeDisplay) {
+            elements.bufferSizeDisplay.textContent = `${bufferStatus.size}/${bufferStatus.maxSize}`;
+        }
+        
+        if (elements.bufferUtilization) {
+            elements.bufferUtilization.textContent = `${bufferStatus.utilization.toFixed(1)}%`;
+        }
+    }
 }
 
 // Handle snapshot
@@ -844,7 +1085,122 @@ function startClock() {
     setInterval(updateTime, 1000);
 }
 
-// Add CSS animations
+// Add frame buffer control functions
+function createFrameBufferControls() {
+    const controlsHTML = `
+        <div class="frame-buffer-controls" style="margin-top: 15px; padding: 15px; background: #f0f0f0; border-radius: 8px;">
+            <h4 style="margin-top: 0;">Frame Buffer Controls</h4>
+            
+            <div class="control-group" style="margin-bottom: 10px;">
+                <label for="streamModeSelect">Streaming Mode:</label>
+                <select id="streamModeSelect" onchange="changeStreamingMode(this.value)">
+                    <option value="live">Live (Real-time)</option>
+                    <option value="buffered">Buffered (Delayed)</option>
+                    <option value="both">Both (Hybrid)</option>
+                </select>
+            </div>
+            
+            <div class="buffer-controls" style="display: none;">
+                <div class="buffer-stats" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                    <div>
+                        <label>Buffer Size:</label>
+                        <span id="bufferSizeDisplay">0/0</span>
+                    </div>
+                    <div>
+                        <label>Utilization:</label>
+                        <span id="bufferUtilization">0%</span>
+                    </div>
+                    <div>
+                        <label>Frame Rate:</label>
+                        <span id="frameRateDisplay">0 FPS</span>
+                    </div>
+                    <div>
+                        <label>Connection:</label>
+                        <span id="connectionQuality" class="quality-indicator">Good</span>
+                    </div>
+                </div>
+                
+                <div class="buffer-actions" style="display: flex; gap: 10px;">
+                    <button id="bufferReplayBtn" onclick="replayBufferedFrames()">Replay Last 10</button>
+                    <button id="bufferClearBtn" onclick="clearFrameBuffer()">Clear Buffer</button>
+                    <label style="margin-left: auto;">
+                        <input type="checkbox" id="adaptiveToggle" checked onchange="toggleAdaptiveStreaming(this.checked)">
+                        Adaptive Streaming
+                    </label>
+                </div>
+            </div>
+            
+            <div id="bufferMemoryUsage" style="margin-top: 10px; font-size: 12px; color: #666;">
+                Memory: 0 MB / 0 MB total
+            </div>
+        </div>
+    `;
+    
+    // Insert controls after video container
+    const videoSection = elements.videoCanvas.parentElement;
+    const controlsDiv = document.createElement('div');
+    controlsDiv.innerHTML = controlsHTML;
+    videoSection.appendChild(controlsDiv);
+    
+    // Update element references
+    elements.streamModeSelect = document.getElementById('streamModeSelect');
+    elements.bufferSizeDisplay = document.getElementById('bufferSizeDisplay');
+    elements.bufferUtilization = document.getElementById('bufferUtilization');
+    elements.frameRateDisplay = document.getElementById('frameRateDisplay');
+    elements.connectionQuality = document.getElementById('connectionQuality');
+    elements.adaptiveToggle = document.getElementById('adaptiveToggle');
+    elements.bufferReplayBtn = document.getElementById('bufferReplayBtn');
+    elements.bufferClearBtn = document.getElementById('bufferClearBtn');
+}
+
+// Change streaming mode
+function changeStreamingMode(mode) {
+    streamingMode = mode;
+    if (currentCameraId) {
+        subscribeToFrames(currentCameraId, mode);
+    }
+    
+    // Update frame handler mode if available
+    if (frameHandler) {
+        if (mode === 'live' && !frameHandler.streamUrl) {
+            frameHandler.switchMode('websocket');
+        }
+    }
+}
+
+// Replay buffered frames
+function replayBufferedFrames() {
+    if (!currentCameraId) {
+        showNotification('Please select a camera first', 'warning');
+        return;
+    }
+    
+    socket.emit('get_frame_history', {
+        cameraId: currentCameraId,
+        count: 10,
+        newest: true
+    });
+}
+
+// Clear frame buffer
+function clearFrameBuffer() {
+    if (frameHandler) {
+        frameHandler.clearBuffer();
+        showNotification('Frame buffer cleared', 'success');
+    }
+    
+    if (currentCameraId) {
+        socket.emit('clear_buffer', { cameraId: currentCameraId });
+    }
+}
+
+// Toggle adaptive streaming
+function toggleAdaptiveStreaming(enabled) {
+    adaptiveStreamingEnabled = enabled;
+    showNotification(`Adaptive streaming ${enabled ? 'enabled' : 'disabled'}`, 'info');
+}
+
+// Add CSS animations and styles
 const style = document.createElement('style');
 style.textContent = `
     @keyframes slideIn {
@@ -868,8 +1224,45 @@ style.textContent = `
             opacity: 0;
         }
     }
+    
+    .quality-indicator {
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    
+    .quality-good {
+        background: #4ade80;
+        color: #000;
+    }
+    
+    .quality-medium {
+        background: #fbbf24;
+        color: #000;
+    }
+    
+    .quality-poor {
+        background: #ef4444;
+        color: #fff;
+    }
+    
+    .buffer-controls label {
+        font-size: 12px;
+        color: #666;
+        margin-right: 5px;
+    }
 `;
 document.head.appendChild(style);
+
+// Initialize frame buffer controls on DOM ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        createFrameBufferControls();
+    });
+} else {
+    createFrameBufferControls();
+}
 
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {

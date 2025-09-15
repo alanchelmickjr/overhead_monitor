@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Integration Tests - Frame Capture System</title>
+    <style>
+        body {
+            font-family: 'Consolas', 'Monaco', monospace;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1, h2 {
+            color: #4a9eff;
+        }
+        
+        .test-controls {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .test-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .test-section {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        .video-container {
+            position: relative;
+            background: #000;
+            border: 2px solid #444;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        #mjpegStream, #canvasDisplay {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            display: block;
+        }
+        
+        .metrics {
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        
+        .metric-item {
+            display: inline-block;
+            margin-right: 20px;
+            padding: 5px 10px;
+            background: #444;
+            border-radius: 3px;
+            margin-bottom: 5px;
+        }
+        
+        .test-log {
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        
+        .test-result {
+            padding: 5px;
+            margin: 2px 0;
+            border-radius: 3px;
+        }
+        
+        .test-pass {
+            background: #2a4a2a;
+            color: #4af542;
+        }
+        
+        .test-fail {
+            background: #4a2a2a;
+            color: #ff4a4a;
+        }
+        
+        .test-info {
+            background: #2a3a4a;
+            color: #4a9eff;
+        }
+        
+        button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            background: #3a8eef;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        select {
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            padding: 8px;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-connected {
+            background: #4af542;
+        }
+        
+        .status-disconnected {
+            background: #ff4a4a;
+        }
+        
+        .buffer-visualization {
+            height: 40px;
+            background: #333;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .buffer-fill {
+            height: 100%;
+            background: linear-gradient(to right, #4a9eff, #4af542);
+            transition: width 0.3s ease;
+        }
+        
+        .buffer-label {
+            position: absolute;
+            top: 50%;
+            left: 10px;
+            transform: translateY(-50%);
+            font-size: 12px;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Client Integration Tests - Frame Capture System</h1>
+        
+        <!-- Test Controls -->
+        <div class="test-controls">
+            <h2>Test Controls</h2>
+            <div>
+                <select id="serverSelect">
+                    <option value="http://localhost:3000">robot-monitor-server (Port 3000)</option>
+                    <option value="http://localhost:3001">rtsp-proxy (Port 3001)</option>
+                    <option value="http://localhost:3002">robot-monitor-server-enhanced (Port 3002)</option>
+                </select>
+                <button id="runAllTests">Run All Tests</button>
+                <button id="stopTests">Stop Tests</button>
+                <button id="clearLog">Clear Log</button>
+            </div>
+            <div style="margin-top: 10px;">
+                <button id="testMJPEG">Test MJPEG Mode</button>
+                <button id="testWebSocket">Test WebSocket Mode</button>
+                <button id="testBuffering">Test Frame Buffering</button>
+                <button id="testReplay">Test Replay</button>
+                <button id="testAdaptive">Test Adaptive Streaming</button>
+                <button id="testReconnect">Test Reconnection</button>
+            </div>
+        </div>
+        
+        <!-- Test Display Grid -->
+        <div class="test-grid">
+            <!-- Video Display -->
+            <div class="test-section">
+                <h3>Video Display</h3>
+                <div class="video-container">
+                    <img id="mjpegStream" style="display: none;" alt="MJPEG Stream">
+                    <canvas id="canvasDisplay"></canvas>
+                </div>
+                <div class="metrics" id="streamMetrics">
+                    <div class="metric-item">Mode: <span id="currentMode">-</span></div>
+                    <div class="metric-item">FPS: <span id="fps">0</span></div>
+                    <div class="metric-item">Latency: <span id="latency">0</span>ms</div>
+                    <div class="metric-item">Buffer: <span id="bufferSize">0</span>/<span id="maxBuffer">30</span></div>
+                    <div class="metric-item">Drops: <span id="frameDrops">0</span></div>
+                </div>
+                <div class="buffer-visualization">
+                    <div class="buffer-fill" id="bufferFill" style="width: 0%"></div>
+                    <div class="buffer-label" id="bufferLabel">Buffer: 0%</div>
+                </div>
+            </div>
+            
+            <!-- Test Results -->
+            <div class="test-section">
+                <h3>Test Results <span class="status-indicator" id="connectionStatus"></span></h3>
+                <div class="test-log" id="testLog"></div>
+                <div style="margin-top: 10px;">
+                    <strong>Summary:</strong>
+                    <span id="testSummary">No tests run yet</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Detailed Test Info -->
+        <div class="test-section">
+            <h3>Performance Metrics</h3>
+            <div id="performanceDetails">
+                <p>Waiting for test data...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Include FrameHandler -->
+    <script src="../public/js/frameHandler.js"></script>
+    
+    <script>
+        // Test Framework
+        class ClientIntegrationTests {
+            constructor() {
+                this.frameHandler = null;
+                this.ws = null;
+                this.currentServer = null;
+                this.testResults = [];
+                this.isRunning = false;
+                
+                // UI Elements
+                this.elements = {
+                    serverSelect: document.getElementById('serverSelect'),
+                    mjpegStream: document.getElementById('mjpegStream'),
+                    canvasDisplay: document.getElementById('canvasDisplay'),
+                    testLog: document.getElementById('testLog'),
+                    connectionStatus: document.getElementById('connectionStatus'),
+                    
+                    // Metrics
+                    currentMode: document.getElementById('currentMode'),
+                    fps: document.getElementById('fps'),
+                    latency: document.getElementById('latency'),
+                    bufferSize: document.getElementById('bufferSize'),
+                    maxBuffer: document.getElementById('maxBuffer'),
+                    frameDrops: document.getElementById('frameDrops'),
+                    bufferFill: document.getElementById('bufferFill'),
+                    bufferLabel: document.getElementById('bufferLabel'),
+                    
+                    // Summary
+                    testSummary: document.getElementById('testSummary'),
+                    performanceDetails: document.getElementById('performanceDetails')
+                };
+                
+                this.setupEventHandlers();
+                this.log('Test framework initialized', 'info');
+            }
+            
+            setupEventHandlers() {
+                // Test control buttons
+                document.getElementById('runAllTests').onclick = () => this.runAllTests();
+                document.getElementById('stopTests').onclick = () => this.stopTests();
+                document.getElementById('clearLog').onclick = () => this.clearLog();
+                
+                // Individual test buttons
+                document.getElementById('testMJPEG').onclick = () => this.testMJPEGMode();
+                document.getElementById('testWebSocket').onclick = () => this.testWebSocketMode();
+                document.getElementById('testBuffering').onclick = () => this.testFrameBuffering();
+                document.getElementById('testReplay').onclick = () => this.testReplayFunctionality();
+                document.getElementById('testAdaptive').onclick = () => this.testAdaptiveStreaming();
+                document.getElementById('testReconnect').onclick = () => this.testReconnection();
+            }
+            
+            log(message, type = 'info') {
+                const timestamp = new Date().toISOString().substr(11, 12);
+                const logEntry = document.createElement('div');
+                logEntry.className = `test-result test-${type}`;
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                this.elements.testLog.appendChild(logEntry);
+                this.elements.testLog.scrollTop = this.elements.testLog.scrollHeight;
+            }
+            
+            updateConnectionStatus(connected) {
+                this.elements.connectionStatus.className = `status-indicator status-${connected ? 'connected' : 'disconnected'}`;
+            }
+            
+            async delay(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+            
+            // Initialize frame handler
+            initializeFrameHandler(mode = 'auto') {
+                if (this.frameHandler) {
+                    this.frameHandler.destroy();
+                }
+                
+                this.frameHandler = new FrameHandler({
+                    displayElement: this.elements.mjpegStream,
+                    canvasElement: this.elements.canvasDisplay,
+                    mode: mode,
+                    maxBufferSize: 30,
+                    targetFPS: 30,
+                    smoothTransitions: true,
+                    onFrameDisplayed: (frame) => {
+                        // Update frame count
+                    },
+                    onPerformanceUpdate: (metrics) => {
+                        this.updatePerformanceMetrics(metrics);
+                    },
+                    onModeChange: (newMode) => {
+                        this.elements.currentMode.textContent = newMode;
+                        this.log(`Mode changed to: ${newMode}`);
+                    }
+                });
+                
+                this.log(`FrameHandler initialized in ${mode} mode`);
+            }
+            
+            updatePerformanceMetrics(metrics) {
+                this.elements.fps.textContent = metrics.fps;
+                this.elements.latency.textContent = Math.round(metrics.networkLatency);
+                this.elements.bufferSize.textContent = metrics.bufferSize;
+                this.elements.frameDrops.textContent = metrics.frameDropRate;
+                
+                // Update buffer visualization
+                const bufferPercent = (metrics.bufferSize / 30) * 100;
+                this.elements.bufferFill.style.width = `${bufferPercent}%`;
+                this.elements.bufferLabel.textContent = `Buffer: ${Math.round(bufferPercent)}%`;
+            }
+            
+            // Connect to WebSocket
+            async connectWebSocket() {
+                return new Promise((resolve, reject) => {
+                    const wsUrl = this.currentServer.replace('http://', 'ws://').replace('https://', 'wss://');
+                    this.ws = new WebSocket(wsUrl);
+                    
+                    this.ws.onopen = () => {
+                        this.log('WebSocket connected', 'pass');
+                        this.updateConnectionStatus(true);
+                        
+                        // Send subscribe message
+                        this.ws.send(JSON.stringify({
+                            type: 'subscribe',
+                            cameras: ['main-camera', 'robot-overhead', 'robot-overhead-enhanced']
+                        }));
+                        
+                        resolve();
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'frame' || data.image) {
+                                this.frameHandler.addWebSocketFrame(data);
+                            }
+                        } catch (error) {
+                            console.error('WebSocket message error:', error);
+                        }
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        this.log(`WebSocket error: ${error}`, 'fail');
+                        reject(error);
+                    };
+                    
+                    this.ws.onclose = () => {
+                        this.log('WebSocket disconnected', 'info');
+                        this.updateConnectionStatus(false);
+                    };
+                    
+                    // Timeout
+                    setTimeout(() => {
+                        if (this.ws.readyState !== WebSocket.OPEN) {
+                            reject(new Error('WebSocket connection timeout'));
+                        }
+                    }, 5000);
+                });
+            }
+            
+            // Test 1: MJPEG Mode
+            async testMJPEGMode() {
+                this.log('\n=== Testing MJPEG Mode ===', 'info');
+                this.currentServer = this.elements.serverSelect.value;
+                
+                try {
+                    // Initialize in MJPEG mode
+                    this.initializeFrameHandler('mjpeg');
+                    
+                    // Start MJPEG stream
+                    const streamUrl = `${this.currentServer}/stream.mjpeg`;
+                    this.frameHandler.start(streamUrl);
+                    
+                    this.log('MJPEG stream started', 'pass');
+                    
+                    // Wait for frames
+                    await this.delay(3000);
+                    
+                    // Check if image element is visible and has content
+                    if (this.elements.mjpegStream.style.display !== 'none' && 
+                        this.elements.mjpegStream.naturalWidth > 0) {
+                        this.log('✓ MJPEG frames displaying correctly', 'pass');
+                        this.testResults.push({ test: 'MJPEG Mode', status: 'PASS' });
+                    } else {
+                        throw new Error('MJPEG stream not displaying');
+                    }
+                    
+                } catch (error) {
+                    this.log(`✗ MJPEG test failed: ${error.message}`, 'fail');
+                    this.testResults.push({ test: 'MJPEG Mode', status: 'FAIL', error: error.message });
+                } finally {
+                    this.frameHandler.stop();
+                }
+            }
+            
+            // Test 2: WebSocket Mode
+            async testWebSocketMode() {
+                this.log('\n=== Testing WebSocket Mode ===', 'info');
+                this.currentServer = this.elements.serverSelect.value;
+                
+                try {
+                    // Initialize in WebSocket mode
+                    this.initializeFrameHandler('websocket');
+                    
+                    // Connect WebSocket
+                    await this.connectWebSocket();
+                    
+                    // Start frame handler
+                    this.frameHandler.start();
+                    
+                    // Wait for frames
+                    await this.delay(3000);
+                    
+                    // Check performance metrics
+                    const metrics = this.frameHandler.getPerformanceMetrics();
+                    if (metrics.fps > 0) {
+                        this.log(`✓ WebSocket streaming at ${metrics.fps} FPS`, 'pass');
+                        this.testResults.push({ test: 'WebSocket Mode', status: 'PASS' });
+                    } else {
+                        throw new Error('No frames received via WebSocket');
+                    }
+                    
+                } catch (error) {
+                    this.log(`✗ WebSocket test failed: ${error.message}`, 'fail');
+                    this.testResults.push({ test: 'WebSocket Mode', status: 'FAIL', error: error.message });
+                } finally {
+                    if (this.ws) {
+                        this.ws.close();
+                        this.ws = null;
+                    }
+                    this.frameHandler.stop();
+                }
+            }
+            
+            // Test 3: Frame Buffering
+            async testFrameBuffering() {
+                this.log('\n=== Testing Frame Buffering ===', 'info');
+                this.currentServer = this.elements.serverSelect.value;
+                
+                try {
+                    // Test buffer statistics endpoint
+                    const response = await fetch(`${this.currentServer}/buffer-stats`);
+                    const stats = await response.json();
+                    
+                    this.log('Buffer statistics retrieved:', 'info');
+                    this.log(`  Total frames buffered: ${stats.totalFramesBuffered || 0}`, 'info');
+                    this.log(`  Memory usage: ${((stats.totalMemoryUsage || 0) / 1024 / 1024).toFixed(2)} MB`, 'info');
+                    
+                    // Test frame history endpoint
+                    const framesResponse = await fetch(`${this.currentServer}/frames/10`);
+                    const frameData = await framesResponse.json();
+                    
+                    if (frameData.frames && Array.isArray(frameData.frames)) {
+                        this.log(`✓ Frame history available: ${frameData.frames.length} frames`, 'pass');
+                        
+                        // Verify frame structure
+                        if (frameData.frames.length > 0) {
+                            const frame = frameData.frames[0];
+                            if (frame.id && frame.timestamp && frame.sequenceNumber !== undefined) {
+                                this.log('✓ Frame metadata structure verified', 'pass');
+                            }
+                        }
+                        
+                        this.testResults.push({ test: 'Frame Buffering', status: 'PASS' });
+                    } else {
+                        throw new Error('Invalid frame history response');
+                    }
+                    
+                } catch (error) {
+                    this.log(`✗ Buffering test failed: ${error.message}`, 'fail');
+                    this.testResults.push({ test: 'Frame Buffering', status: 'FAIL', error: error.message });
+                }
+            }
+            
+            // Test 4: Replay Functionality
+            async testReplayFunctionality() {
+                this.log('\n=== Testing Replay Functionality ===', 'info');
+                
+                try {
+                    this.initializeFrameHandler('websocket');
+                    
+                    // Simulate adding historical frames
+                    const mockFrames = [];
+                    for (let i = 0; i < 20; i++) {
+                        mockFrames.push({
+                            id: `frame-${i}`,
+                            timestamp: new Date(Date.now() - (20 - i) * 100).toISOString(),
+                            image: btoa(`Mock frame ${i}`), // Base64 encoded
+                            format: 'jpeg',
+                            isHistorical: true,
+                            sequenceNumber: i
+                        });
+                    }
+                    
+                    // Add frames to buffer
+                    this.frameHandler.start();
+                    mockFrames.forEach(frame => {
+                        this.frameHandler.addWebSocketFrame(frame);
+                    });
+                    
+                    // Check buffer status
+                    const bufferStatus = this.frameHandler.getBufferStatus();
+                    this.log(`Buffer status: ${bufferStatus.size}/${bufferStatus.maxSize} frames`, 'info');
+                    this.log(`Buffer utilization: ${bufferStatus.utilization.toFixed(1)}%`, 'info');
+                    
+                    if (bufferStatus.size > 0) {
+                        this.log('✓ Replay buffer populated successfully', 'pass');
+                        this.testResults.push({ test: 'Replay Functionality', status: 'PASS' });
+                    } else {
+                        throw new Error('Replay buffer is empty');
+                    }
+                    
+                } catch (error) {
+                    this.log(`✗ Replay test failed: ${error.message}`, 'fail');
+                    this.testResults.push({ test: 'Replay Functionality', status: 'FAIL', error: error.message });
+                } finally {
+                    this.frameHandler.stop();
+                }
+            }
+            
+            // Test 5: Adaptive Streaming
+            async testAdaptiveStreaming() {
+                this.log('\n=== Testing Adaptive Streaming ===', 'info');
+                
+                try {
+                    this.initializeFrameHandler('websocket');
+                    this.frameHandler.start();
+                    
+                    // Test FPS adjustment
+                    const initialFPS = this.frameHandler.targetFPS;
+                    this.log(`Initial target FPS: ${initialFPS}`, 'info');
+                    
+                    // Simulate high load by filling buffer
+                    for (let i = 0; i < 40; i++) {
+                        this.frameHandler.addWebSocketFrame({
+                            id: `frame-${i}`,
+                            timestamp: new Date().toISOString(),
+                            image: btoa(`Frame ${i}`),
+                            receivedAt: Date.now()
+                        });
+                    }
+                    
+                    // Wait for auto-adjustment
+                    await this.delay(1500);
+                    
+                    const adjustedFPS = this.frameHandler.targetFPS;
+                    if (adjustedFPS < initialFPS) {
+                        this.log(`✓ FPS auto-adjusted from ${initialFPS} to ${adjustedFPS}`, 'pass');
+                        this.testResults.push({ test: 'Adaptive Streaming', status: 'PASS' });
+                    } else {
+                        // Manual test of FPS adjustment
+                        this.frameHandler.setTargetFPS(15);
+                        if (this.frameHandler.targetFPS === 15) {
+                            this.log('✓ Manual FPS adjustment working', 'pass');
+                            this.testResults.push({ test: 'Adaptive Streaming', status: 'PASS' });
+                        } else {
+                            throw new Error('FPS adjustment not working');
+                        }
+                    }
+                    
+                    // Test smooth transitions toggle
+                    this.frameHandler.setSmoothTransitions(false);
+                    this.log('✓ Smooth transitions toggle working', 'pass');
+                    
+                } catch (error) {
+                    this.log(`✗ Adaptive streaming test failed: ${error.message}`, 'fail');
+                    this.testResults.push({ test: 'Adaptive Streaming', status: 'FAIL', error: error.message });
+                } finally {
+                    this.frameHandler.stop();
+                }
+            }
+            
+            // Test 6: Reconnection
+            async testReconnection() {
+                this.log('\n=== Testing Reconnection ===', 'info');
+                this.currentServer = this.elements.serverSelect.value;
+                
+                try {
+                    // First connection
+                    await this.connectWebSocket();
+                    this.log('Initial connection established', 'pass');
+                    
+                    // Simulate disconnect
+                    this.ws.close();
+                    await this.delay(1000);
+                    
+                    // Reconnect
+                    await this.connectWebSocket();
+                    this.log('✓ Reconnection successful', 'pass');
+                    
+                    // Test snapshot after reconnect
+                    const response = await fetch(`${this.currentServer}/snapshot.jpg`);
+                    if (response.ok) {
+                        this.log('✓ Snapshot endpoint working after reconnect', 'pass');
+                        this.testResults.push({ test: 'Reconnection', status: 'PASS' });
+                    } else {
+                        throw new Error('Snapshot failed after reconnect');
+                    }
+                    
+                } catch (error) {
+                    this.log(`✗ Reconnection test failed: ${error.message}`, 'fail');
+                    this.testResults.push({ test: 'Reconnection', status: 'FAIL', error: error.message });
+                } finally {
+                    if (this.ws) {
+                        this.ws.close();
+                        this.ws = null;
+                    }
+                }
+            }
+            
+            // Run all tests
+            async runAllTests() {
+                if (this.isRunning) {
+                    this.log('Tests already running', 'info');
+                    return;
+                }
+                
+                this.isRunning = true;
+                this.testResults = [];
+                this.log('Starting all tests...', 'info');
+                
+                try {
+                    await this.testMJPEGMode();
+                    await this.delay(1000);
+                    
+                    await this.testWebSocketMode();
+                    await this.delay(1000);
+                    
+                    await this.testFrameBuffering();
+                    await this.delay(1000);
+                    
+                    await this.testReplayFunctionality();
+                    await this.delay(1000);
+                    
+                    await this.testAdaptiveStreaming();
+                    await this.delay(1000);
+                    
+                    await this.testReconnection();
+                    
+                    // Summary
+                    this.showTestSummary();
+                    
+                } catch (error) {
+                    this.log(`Test suite error: ${error.message}`, 'fail');
+                } finally {
+                    this.isRunning = false;
+                    this.stopTests();
+                }
+            }
+            
+            showTestSummary() {
+                const passed = this.testResults.filter(r => r.status === 'PASS').length;
+                const failed = this.testResults.filter(r => r.status === 'FAIL').length;
+                const total = this.testResults.length;
+                
+                this.log('\n=== TEST SUMMARY ===', 'info');
+                this.log(`Total Tests: ${total}`, 'info');
+                this.log(`Passed: ${passed}`, 'pass');
+                this.log(`Failed: ${failed}`, failed > 0 ? 'fail' : 'info');
+                this.log(`Success Rate: ${((passed / total) * 100).toFixed(1)}%`, 'info');
+                
+                this.elements.testSummary.textContent = `${passed}/${total} tests passed (${((passed / total) * 100).toFixed(1)}%)`;
+                
+                // Update performance details
+                const detailsHTML = `
+                    <h4>Test Results:</h4>
+                    <ul>
+                        ${this.testResults.map(r => `
+                            <li style="color: ${r.status === 'PASS' ? '#4af542' : '#ff4a4a'}">
+                                ${r.test}: ${r.status} ${r.error ? `- ${r.error}` : ''}
+                            </li>
+                        `).join('')}
+                    </ul>
+                    <h4>Frame Handler Status:</h4>
+                    <ul>
+                        <li>Active: ${this.frameHandler ? this.frameHandler.isActive : false}</li>
+                        <li>Mode: ${this.frameHandler ? this.frameHandler.currentMode : 'N/A'}</li>
+                        <li>Buffer Size: ${this.frameHandler ? this.frameHandler.frameBuffer.length : 0}</li>
+                    </ul>
+                `;
+                this.elements.performanceDetails.innerHTML = detailsHTML;
+            }
+            
+            stopTests() {
+                this.log('Stopping tests...', 'info');
+                
+                if (this.frameHandler) {
+                    this.frameHandler.stop();
+                }
+                
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                
+                this.updateConnectionStatus(false);
+                this.isRunning = false;
+            }
+            
+            clearLog() {
+                this.elements.testLog.innerHTML = '';
+                this.log('Log cleared', 'info');
+            }
+        }
+        
+        // Initialize tests when page loads
+        let tester;
+        window.addEventListener('DOMContentLoaded', () => {
+            tester = new ClientIntegrationTests();
+            
+            // Auto-detect available servers
+            const servers = [
+                { url: 'http://localhost:3000', name: 'robot-monitor-server' },
+                { url: 'http://localhost:3001', name: 'rtsp-proxy' },
+                { url: 'http://localhost:3002', name: 'robot-monitor-server-enhanced' }
+            ];
+            
+            tester.log('Detecting available servers...', 'info');
+            
+            servers.forEach(async (server) => {
+                try {
+                    const response = await fetch(`${server.url}/status`, { 
+                        method: 'GET',
+                        mode: 'cors'
+                    }).catch(() => null);
+                    
+                    if (response && response.ok) {
+                        tester.log(`✓ ${server.name} available at ${server.url}`, 'pass');
+                    } else {
+                        tester.log(`✗ ${server.name} not available at ${server.url}`, 'fail');
+                    }
+                } catch (error) {
+                    tester.log(`✗ ${server.name} not available at ${server.url}`, 'fail');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

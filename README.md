@@ -1,231 +1,151 @@
-# Robot Overhead Monitor 🤖📷
+# LeKiwi Robot Nanny Cam 🤖🥝
 
-A real-time vision monitoring system that uses SmolVLM to observe and analyze robot behavior in a pen environment through an overhead IP camera. The system detects critical events, tracks performance, and provides alerts for various robot conditions.
+> *Overhead monitoring system for LeKiwi holonomic robots with 6DOF arms*
 
-## Overview
+A real-time computer vision system that watches LeKiwi robots from above, tracking their movements, arm operations, and ball-in-bucket scoring events in the arena.
 
-The Robot Overhead Monitor leverages computer vision and language models to continuously monitor robots in their operational environment. Using an overhead IP camera, the system captures frames at configurable intervals and analyzes them for specific conditions like task completion, robot failures, or performance metrics.
+![Robot Status](https://img.shields.io/badge/LeKiwi-Active-brightgreen)
+![Vision AI](https://img.shields.io/badge/Vision-AI%20Powered-blue)
+![Scoring](https://img.shields.io/badge/Ball%20Tracking-Enabled-ff69b4)
 
-## Key Features
+## 🤖 What are LeKiwi Robots?
 
-- **Real-time IP Camera Integration**: Connects to overhead room cameras for continuous monitoring
-- **Intelligent Event Detection**: Identifies robot tipping, stuck conditions, collisions, and task completions
-- **Configurable Alert System**: Customizable thresholds and response actions
-- **Performance Analytics**: Tracks robot movement patterns, task completion times, and efficiency
-- **Web-based Dashboard**: Live video feed with overlay zones and status indicators
-- **Event Logging**: Comprehensive logging with timestamps and screenshots
-- **Multi-robot Support**: Monitor and coordinate multiple robots simultaneously
+LeKiwi robots by Hugging Face feature:
+- **Holonomic Drive Base**: Tri-wheel omnidirectional movement
+- **6DOF Robot Arm**: LeRobot arm mounted on top for manipulation tasks
+- **Round Form Factor**: Compact circular design for agile navigation
 
-## Quick Start
+## 📹 System Overview
 
-### Prerequisites
+The nanny cam system provides:
+- **Overhead Camera View**: Wall-mounted camera looking down at the robot arena floor
+- **Real-time Robot Tracking**: Monitor multiple LeKiwi robots simultaneously
+- **Ball-in-Bucket Scoring**: Automatic point detection when balls enter the white bucket
+- **Multi-Model Vision AI**: LLaVA, SmolVLM, and custom model support
+- **Remote Access**: Built-in ngrok integration for monitoring from anywhere
 
-- Node.js 18+ or Python 3.10+
-- Access to IP camera with RTSP/HTTP stream
-- SmolVLM API server running locally or accessible endpoint
-- Modern web browser (Chrome, Firefox, Safari)
-
-### Installation
+## 🚀 Quick Start
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/overhead_monitor.git
-cd overhead_monitor
+git clone https://github.com/yourusername/lekiwi-robot-nanny-cam.git
+cd lekiwi-robot-nanny-cam
 
-# Install dependencies (if using Node.js backend)
-npm install
+# One button to rule them all
+./start-all.sh
 
-# Or for Python backend
-pip install -r requirements.txt
+# That's it! The system will:
+# - Install all dependencies
+# - Download AI models
+# - Start the camera feed
+# - Launch the monitoring interface
 ```
 
-### Configuration
+## 🌐 Remote Access Setup
 
-1. Copy the example configuration:
+Watch your robots from anywhere with automated ngrok setup:
+
 ```bash
-cp config.example.json config.json
+# Run the automated setup wizard
+./setup-ngrok.sh
+
+# Or configure manually if preferred
+ngrok config add-authtoken YOUR_TOKEN_HERE
 ```
 
-2. Edit `config.json` with your IP camera details:
+## 📊 Features
+
+### Robot Monitoring
+- Track multiple LeKiwi robots in real-time
+- Monitor arm movements and manipulation tasks
+- Detect robot collisions or stuck conditions
+- Record robot paths and activity patterns
+
+### Ball-in-Bucket Scoring
+- Automatic detection when balls enter the white bucket
+- Score tracking and event logging
+- Visual indicators for successful shots
+- Dataset creation for training robot shooting skills
+
+### Vision AI Capabilities
+- **Object Detection**: Identify robots, balls, and obstacles
+- **Motion Analysis**: Track movement patterns and trajectories
+- **Event Recognition**: Detect specific robot behaviors
+- **Multi-Model Support**: Switch between different AI models on the fly
+
+## 🛠️ System Architecture
+
+```
+Wall Camera (Overhead View)
+         |
+         v
+  Camera Server (RTSP)
+         |
+         v
+   Vision AI Engine
+    /    |    \
+LLaVA  SmolVLM  Custom
+   \     |     /
+    Web Interface
+         |
+    Remote Access
+      (ngrok)
+```
+
+## 📱 Interface
+
+Access the monitoring dashboard at:
+- **Local**: http://localhost:3000
+- **Remote**: Your ngrok URL (shown after running start-all.sh)
+
+### Dashboard Features
+- Live camera feed with overlay
+- Robot status indicators
+- Score counter for ball-in-bucket events
+- Model selection dropdown
+- Event log and alerts
+
+## 🎯 Use Cases
+
+1. **Robot Training**: Create datasets for robot manipulation tasks
+2. **Competition Monitoring**: Track robot performance in challenges
+3. **Research**: Analyze robot behavior patterns
+4. **Remote Supervision**: Monitor robot arena from anywhere
+5. **Fun**: Keep score of robot basketball games!
+
+## 🔧 Configuration
+
+### Camera Setup
+Edit `config.json` to set your camera URL:
 ```json
 {
   "camera": {
-    "ip": "192.168.1.100",
-    "username": "admin",
-    "password": "your-password",
-    "stream_url": "rtsp://192.168.1.100:554/stream1"
-  },
-  "api": {
-    "base_url": "http://localhost:8080",
-    "model": "smolvlm-latest"
+    "url": "rtsp://your-camera-ip/stream"
   }
 }
 ```
 
-### Running the System
+### Scoring Zone
+The system automatically detects the white bucket. To adjust detection:
+- Edit detection parameters in `src/detection/EventDetector.js`
+- Modify scoring logic in `src/vision/VisionEngine.js`
 
-```bash
-# Start the monitoring server
-npm start
+## 📚 Documentation
 
-# Or for Python
-python app.py
-```
+- [API Documentation](API.md)
+- [Architecture Guide](ARCHITECTURE.md)
+- [Monitoring Guide](MONITORING_GUIDE.md)
+- [Multi-Model Setup](MULTI_MODEL_GUIDE.md)
+- [ngrok Setup](NGROK_SETUP.md)
 
-Open your browser and navigate to `http://localhost:3000`
+## 🤝 Contributing
 
-## System Architecture
+We welcome contributions! Whether it's improving robot detection, adding new scoring modes, or enhancing the UI.
 
-The system consists of several key components:
+## 📄 License
 
-- **Camera Interface**: Handles IP camera connection and stream processing
-- **Vision Processing**: Captures frames and sends to SmolVLM API
-- **Detection Engine**: Analyzes responses for specific robot conditions
-- **Alert Manager**: Triggers notifications and actions based on events
-- **Web Dashboard**: Real-time visualization and control interface
-- **Data Storage**: Event logging and metrics persistence
-
-For detailed architecture information, see [ARCHITECTURE.md](ARCHITECTURE.md).
-
-## Robot Monitoring Scenarios
-
-### Critical Events
-- **Robot Tipping**: Detects when a robot has fallen or tipped over
-- **Stuck Detection**: Identifies robots that haven't moved for configured duration
-- **Collision Detection**: Recognizes robot-to-robot or robot-to-obstacle collisions
-- **Boundary Violations**: Alerts when robots leave designated zones
-
-### Performance Tracking
-- **Task Completion**: Monitors successful task execution
-- **Path Efficiency**: Analyzes movement patterns and optimization
-- **Speed Monitoring**: Tracks robot velocity and acceleration patterns
-- **Coordination Metrics**: Multi-robot collaboration effectiveness
-
-### Training Dataset Creation
-- **Ball-in-Cup Tracking**: Specialized mode for creating pick-and-place training datasets
-  - Automatic scoring of successful ball placements
-  - State transition detection (ball in/out of cup)
-  - Human gesture recognition for dataset segmentation
-  - Visual indicators for training operators
-  - See [BALL_IN_CUP_TRACKING_DOCUMENTATION.md](BALL_IN_CUP_TRACKING_DOCUMENTATION.md) for details
-
-For comprehensive monitoring scenarios, see [MONITORING_GUIDE.md](MONITORING_GUIDE.md).
-
-## Configuration Options
-
-### Camera Settings
-- Stream type (RTSP, HTTP MJPEG, WebRTC)
-- Frame capture rate (100ms - 2s intervals)
-- Video quality and compression settings
-
-### Detection Parameters
-- Confidence thresholds for event detection
-- Zone definitions for area monitoring
-- Alert sensitivity levels
-- Response action mappings
-
-### UI Customization
-- Dashboard layout options
-- Overlay zone visualization
-- Status indicator preferences
-- Historical data display settings
-
-## API Integration
-
-The system communicates with a SmolVLM-compatible API endpoint:
-
-```javascript
-POST /v1/chat/completions
-{
-  "messages": [{
-    "role": "user",
-    "content": [
-      { "type": "text", "text": "Is the robot tipped over?" },
-      { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,..." }}
-    ]
-  }],
-  "max_tokens": 100
-}
-```
-
-For complete API documentation, see [API.md](API.md).
-
-## Development
-
-### Project Structure
-```
-overhead_monitor/
-├── src/
-│   ├── camera/         # IP camera integration
-│   ├── detection/      # Event detection logic
-│   ├── api/           # SmolVLM API client
-│   └── web/           # Dashboard interface
-├── config/            # Configuration files
-├── docs/             # Documentation
-└── tests/            # Test suites
-```
-
-### Testing
-```bash
-# Run unit tests
-npm test
-
-# Run integration tests
-npm run test:integration
-
-# Run with test camera feed
-npm run dev:mock
-```
-
-### Contributing
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## Troubleshooting
-
-### Common Issues
-
-**Camera Connection Failed**
-- Verify IP camera is accessible on network
-- Check credentials and stream URL
-- Ensure firewall allows camera access
-
-**API Timeout Errors**
-- Confirm SmolVLM server is running
-- Adjust timeout settings in config
-- Check network connectivity
-
-**Low Frame Rate**
-- Reduce video quality settings
-- Increase capture interval
-- Optimize network bandwidth
-
-For detailed troubleshooting, see [SETUP.md](SETUP.md#troubleshooting).
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details
-
-## Acknowledgments
-
-- SmolVLM team for the vision-language model
-- Contributors and testers
-- Robot pen facility for testing environment
-
-## Support
-
-- **Documentation**: [Full documentation](docs/)
-- **Issues**: [GitHub Issues](https://github.com/yourusername/overhead_monitor/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/overhead_monitor/discussions)
+MIT License - Feel free to use this for your robot monitoring needs!
 
 ---
 
-**Current Version**: 1.1.0
-**Last Updated**: September 2025
-
-### Recent Updates
-- **v1.1.0**: Added ball-in-cup event tracking system for training dataset creation
-- **v1.0.0**: Initial release with core monitoring capabilities
+**Built with ❤️ for the LeKiwi robot community**

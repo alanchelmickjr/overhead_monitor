@@ -210,6 +210,17 @@
     "maxFrameWidth": 1920,
     "maxFrameHeight": 1080
   },
+  "frameBuffer": {
+    "enabled": true,
+    "maxMemoryFrames": 100,
+    "diskStorage": {
+      "enabled": true,
+      "path": "./data/frames",
+      "maxSizeMB": 1024,
+      "retentionHours": 24
+    },
+    "captureMetadata": true
+  },
   "database": {
     "type": "postgresql",
     "host": "localhost",
