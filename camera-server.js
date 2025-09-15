@@ -12,7 +12,7 @@ app.use(express.static('.'));
 
 // Main route - serve the camera viewer
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'camera-viewer.html'));
+    res.sendFile(path.join(__dirname, 'test-camera-stream-llava.html'));
 });
 
 // Health check for proxy

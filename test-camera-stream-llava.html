@@ -24,6 +24,34 @@
             padding: 15px;
             background: #1a1a1a;
             border-radius: 8px;
+            gap: 20px;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .model-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .model-selector label {
+            font-size: 14px;
+            color: #888;
+        }
+        
+        .model-selector select {
+            padding: 8px 12px;
+            background: #2a2a2a;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
         }
         
         .main-grid {
@@ -261,12 +289,132 @@
             color: #888;
             margin-top: 5px;
         }
+        
+        .chat-section {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        
+        .chat-section h2 {
+            margin-top: 0;
+            font-size: 20px;
+            color: #4a9eff;
+        }
+        
+        .chat-input-container {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .chat-input {
+            flex: 1;
+            padding: 12px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .chat-input:focus {
+            outline: none;
+            border-color: #4a9eff;
+        }
+        
+        .send-btn {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .send-btn:hover {
+            background: #357abd;
+        }
+        
+        .send-btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        
+        .inference-log {
+            background: #0a0a0a;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        
+        .inference-entry {
+            margin-bottom: 20px;
+            padding: 12px;
+            background: #1a1a1a;
+            border-radius: 4px;
+            border-left: 3px solid #555;
+        }
+        
+        .inference-entry.user {
+            border-left-color: #4a9eff;
+        }
+        
+        .inference-entry.ai {
+            border-left-color: #4af542;
+        }
+        
+        .inference-entry.error {
+            border-left-color: #ff4444;
+        }
+        
+        .inference-timestamp {
+            color: #888;
+            font-size: 11px;
+            margin-bottom: 5px;
+        }
+        
+        .inference-role {
+            font-weight: bold;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+        
+        .inference-entry.user .inference-role {
+            color: #4a9eff;
+        }
+        
+        .inference-entry.ai .inference-role {
+            color: #4af542;
+        }
+        
+        .inference-content {
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤖 SmolVLM Robot Monitor</h1>
+            <div class="header-left">
+                <h1>🤖 SmolVLM Robot Monitor</h1>
+                <div class="model-selector">
+                    <label for="modelSelect">Model:</label>
+                    <select id="modelSelect">
+                        <option value="smolvlm" selected>SmolVLM</option>
+                        <option value="llava">Llava</option>
+                    </select>
+                </div>
+            </div>
             <div id="connectionStatus" class="status">Initializing...</div>
         </div>
         
@@ -297,6 +445,22 @@
                     <div class="stat-item">
                         <div class="stat-value" id="uptimeHours">0</div>
                         <div class="stat-label">Hours Running</div>
+                    </div>
+                </div>
+                
+                <!-- Chat Section -->
+                <div class="chat-section">
+                    <h2>💬 Custom Query</h2>
+                    <div class="chat-input-container">
+                        <input type="text" id="chatInput" class="chat-input"
+                               placeholder="Ask a question about the current camera view..."
+                               onkeypress="if(event.key === 'Enter') sendChatMessage()">
+                        <button id="sendChat" class="send-btn" onclick="sendChatMessage()">Send</button>
+                    </div>
+                    
+                    <h2>📋 Inference Log</h2>
+                    <div class="inference-log" id="inferenceLog">
+                        <div style="color: #666; text-align: center;">No queries yet...</div>
                     </div>
                 </div>
             </div>
@@ -489,8 +653,17 @@
         }
         
         // Call SmolVLM API through proxy (avoids CORS)
-        async function callSmolVLM(imageData, prompt) {
-            const apiUrl = document.getElementById('smolvlmUrl').value;
+        async function callSmolVLM(imageData, prompt, isCustomQuery = false) {
+            const modelSelect = document.getElementById('modelSelect');
+            const selectedModel = modelSelect.value;
+            let apiUrl = document.getElementById('smolvlmUrl').value;
+            
+            // Adjust API URL based on selected model
+            if (selectedModel === 'llava') {
+                // If using Llava, modify the API endpoint
+                apiUrl = apiUrl.replace('/v1/chat/completions', '/v1/chat/completions');
+                // You might need to adjust this based on your Llava server setup
+            }
             
             try {
                 // Use proxy endpoint to avoid CORS issues
@@ -502,7 +675,8 @@
                     body: JSON.stringify({
                         image: imageData,
                         prompt: prompt,
-                        apiUrl: apiUrl
+                        apiUrl: apiUrl,
+                        model: selectedModel
                     })
                 });
                 
@@ -519,12 +693,21 @@
                 
                 const data = await response.json();
                 if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-                    throw new Error('Invalid response format from SmolVLM');
+                    throw new Error(`Invalid response format from ${selectedModel === 'llava' ? 'Llava' : 'SmolVLM'}`);
                 }
-                return data.choices[0].message.content;
+                
+                const result = data.choices[0].message.content;
+                
+                // Log to inference log if it's a custom query
+                if (isCustomQuery) {
+                    addInferenceEntry(result, 'ai');
+                }
+                
+                return result;
             } catch (error) {
                 // Re-throw with more context
-                throw new Error(`SmolVLM API Error: ${error.message}`);
+                const modelName = selectedModel === 'llava' ? 'Llava' : 'SmolVLM';
+                throw new Error(`${modelName} API Error: ${error.message}`);
             }
         }
         
@@ -670,7 +853,8 @@
             const settings = {
                 conditions: [],
                 interval: document.getElementById('analysisInterval').value,
-                apiUrl: document.getElementById('smolvlmUrl').value
+                apiUrl: document.getElementById('smolvlmUrl').value,
+                selectedModel: document.getElementById('modelSelect').value
             };
             
             document.querySelectorAll('.condition-item').forEach(item => {
@@ -701,6 +885,11 @@
                 // Load interval
                 if (settings.interval) {
                     document.getElementById('analysisInterval').value = settings.interval;
+                }
+                
+                // Load selected model
+                if (settings.selectedModel) {
+                    document.getElementById('modelSelect').value = settings.selectedModel;
                 }
                 
                 // Load conditions
@@ -739,6 +928,90 @@
         // Auto-save settings on change
         document.getElementById('analysisInterval').onchange = saveSettings;
         document.getElementById('smolvlmUrl').onchange = saveSettings;
+        document.getElementById('modelSelect').onchange = saveSettings;
+        
+        // Send chat message
+        async function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            if (!message) return;
+            
+            const sendBtn = document.getElementById('sendChat');
+            sendBtn.disabled = true;
+            input.disabled = true;
+            
+            try {
+                // Add user message to inference log
+                addInferenceEntry(message, 'user');
+                
+                // Clear input
+                input.value = '';
+                
+                // Capture current frame
+                addLogEntry('Capturing frame for custom query...', 'info');
+                
+                // Get snapshot from server
+                const response = await fetch('http://localhost:3001/snapshot.jpg');
+                if (!response.ok) {
+                    throw new Error('Failed to capture snapshot');
+                }
+                
+                const blob = await response.blob();
+                const reader = new FileReader();
+                
+                const imageData = await new Promise((resolve, reject) => {
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                
+                // Call AI with custom prompt
+                await callSmolVLM(imageData, message, true);
+                
+            } catch (error) {
+                addLogEntry(`Chat Error: ${error.message}`, 'error');
+                addInferenceEntry(`Error: ${error.message}`, 'error');
+            } finally {
+                sendBtn.disabled = false;
+                input.disabled = false;
+                input.focus();
+            }
+        }
+        
+        // Add entry to inference log
+        function addInferenceEntry(content, type = 'user') {
+            const log = document.getElementById('inferenceLog');
+            
+            // Clear placeholder if this is first entry
+            if (log.querySelector('div[style*="color: #666"]')) {
+                log.innerHTML = '';
+            }
+            
+            const entry = document.createElement('div');
+            entry.className = `inference-entry ${type}`;
+            
+            const timestamp = document.createElement('div');
+            timestamp.className = 'inference-timestamp';
+            timestamp.textContent = new Date().toLocaleString();
+            entry.appendChild(timestamp);
+            
+            const role = document.createElement('div');
+            role.className = 'inference-role';
+            role.textContent = type === 'user' ? 'USER' : type === 'ai' ? 'AI RESPONSE' : 'ERROR';
+            entry.appendChild(role);
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'inference-content';
+            contentDiv.textContent = content;
+            entry.appendChild(contentDiv);
+            
+            log.insertBefore(entry, log.firstChild);
+            
+            // Keep only last 50 entries
+            while (log.children.length > 50) {
+                log.removeChild(log.lastChild);
+            }
+        }
     </script>
 </body>
 </html>
