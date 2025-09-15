@@ -381,6 +381,13 @@ elif [ -f "rtsp-proxy.js" ]; then
     RTSP_PID=$!
 fi
 
+# Start public monitor server
+if [ -f "robot-monitor-public-server.js" ]; then
+    log_info "Starting public monitor server on port 4040..."
+    node robot-monitor-public-server.js &
+    PUBLIC_PID=$!
+fi
+
 # Wait for camera services to be ready
 if wait_for_service 3000 "camera viewer" 30; then
     echo -e "${GREEN}✅ Camera viewer started successfully${NC}"
@@ -392,6 +399,12 @@ if wait_for_service 3001 "RTSP proxy" 30; then
     echo -e "${GREEN}✅ RTSP proxy started successfully${NC}"
 else
     echo -e "${YELLOW}⚠️  RTSP proxy may not be ready yet${NC}"
+fi
+
+if wait_for_service 4040 "Public monitor server" 30; then
+    echo -e "${GREEN}✅ Public monitor server started successfully${NC}"
+else
+    echo -e "${YELLOW}⚠️  Public monitor server may not be ready yet${NC}"
 fi
 
 # Start ngrok tunnels
@@ -406,6 +419,7 @@ echo "========================================"
 check_service 8080 "llama.cpp server"
 check_service 3000 "Camera viewer"
 check_service 3001 "RTSP proxy"
+check_service 4040 "Public monitor server"
 if [[ "$SKIP_NGROK" != "true" ]]; then
     check_service 4040 "ngrok web interface"
 fi
@@ -418,6 +432,7 @@ echo ""
 echo -e "${GREEN}📱 Local Access Points:${NC}"
 echo "   • Camera viewer: http://localhost:3000"
 echo "   • RTSP proxy/Robot Monitor: http://localhost:3001"
+echo "   • Public monitor: http://localhost:4040"
 echo "   • LLaVA test: http://localhost:3000"
 echo "   • LLaVA API: http://localhost:8080/v1/chat/completions"
 if [[ "$SKIP_NGROK" != "true" ]]; then

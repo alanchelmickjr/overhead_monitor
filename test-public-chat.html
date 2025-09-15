@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Public Chat Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #0f0; }
+        #status { margin-bottom: 20px; }
+        #messages { height: 300px; overflow-y: auto; border: 1px solid #0f0; padding: 10px; margin-bottom: 20px; }
+        .message { margin: 5px 0; }
+        input { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; width: 300px; }
+        button { background: #0f0; color: #000; border: none; padding: 5px 15px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Public Chat Test</h1>
+    <div id="status">Status: Connecting...</div>
+    <div id="messages"></div>
+    <div>
+        <input type="text" id="messageInput" placeholder="Type message...">
+        <button onclick="sendMessage()">Send</button>
+        <button onclick="testConnection()">Test Connection</button>
+    </div>
+
+    <script>
+        let ws = null;
+        const statusDiv = document.getElementById('status');
+        const messagesDiv = document.getElementById('messages');
+        const input = document.getElementById('messageInput');
+
+        function log(message) {
+            const div = document.createElement('div');
+            div.className = 'message';
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function updateStatus(message, color = '#0f0') {
+            statusDiv.textContent = `Status: ${message}`;
+            statusDiv.style.color = color;
+        }
+
+        function connect() {
+            updateStatus('Connecting...', 'yellow');
+            ws = new WebSocket('ws://localhost:4040');
+            
+            ws.onopen = () => {
+                updateStatus('Connected', '#0f0');
+                log('WebSocket connected successfully');
+            };
+            
+            ws.onmessage = (event) => {
+                log(`Received: ${event.data}`);
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'chat') {
+                        log(`CHAT: ${data.message}`);
+                    }
+                } catch (e) {
+                    log(`Raw message: ${event.data}`);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                updateStatus('Error', 'red');
+                log(`WebSocket error: ${error}`);
+            };
+            
+            ws.onclose = () => {
+                updateStatus('Disconnected', 'orange');
+                log('WebSocket disconnected');
+                setTimeout(connect, 3000);
+            };
+        }
+
+        function sendMessage() {
+            const message = input.value.trim();
+            if (!message) {
+                log('ERROR: Empty message');
+                return;
+            }
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('ERROR: WebSocket not connected');
+                return;
+            }
+            
+            try {
+                const payload = JSON.stringify({
+                    type: 'chat',
+                    message: message
+                });
+                ws.send(payload);
+                log(`Sent: ${payload}`);
+                input.value = '';
+            } catch (error) {
+                log(`ERROR sending: ${error}`);
+            }
+        }
+
+        function testConnection() {
+            log(`WebSocket state: ${ws ? ws.readyState : 'null'} (0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)`);
+            log(`WebSocket URL: ${ws ? ws.url : 'null'}`);
+        }
+
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Start connection
+        connect();
+    </script>
+</body>
+</html>

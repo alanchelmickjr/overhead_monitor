@@ -406,28 +406,50 @@ class VisionEngine extends EventEmitter {
       const maxTokens = modelConfig?.parameters?.max_tokens || this.maxTokens;
       const temperature = modelConfig?.parameters?.temperature || this.temperature;
       
-      const requestBody = {
-        model: modelName,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: prompt
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: imageBase64
+      // For llama.cpp, use the correct format
+      const isLlamaCpp = this.apiPath === '/completion';
+      
+      let requestBody;
+      if (isLlamaCpp) {
+        // Extract base64 data without the data URL prefix
+        const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
+        
+        requestBody = {
+          prompt: prompt,
+          image_data: [{
+            data: base64Data,
+            id: 1
+          }],
+          n_predict: maxTokens,
+          temperature: temperature,
+          cache_prompt: true,
+          slot_id: -1
+        };
+      } else {
+        // OpenAI format
+        requestBody = {
+          model: modelName,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: prompt
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: imageBase64
+                  }
                 }
-              }
-            ]
-          }
-        ],
-        max_tokens: maxTokens,
-        temperature: temperature
-      };
+              ]
+            }
+          ],
+          max_tokens: maxTokens,
+          temperature: temperature
+        };
+      }
       
       const startTime = Date.now();
       
@@ -444,11 +466,20 @@ class VisionEngine extends EventEmitter {
       
       const processingTime = Date.now() - startTime;
       
-      if (!response.data || !response.data.choices || !response.data.choices[0]) {
-        throw new Error('Invalid API response structure');
+      let content;
+      if (this.apiPath === '/completion') {
+        // llama.cpp format
+        if (!response.data || !response.data.content) {
+          throw new Error('Invalid llama.cpp response structure');
+        }
+        content = response.data.content;
+      } else {
+        // OpenAI format
+        if (!response.data || !response.data.choices || !response.data.choices[0]) {
+          throw new Error('Invalid API response structure');
+        }
+        content = response.data.choices[0].message.content;
       }
-      
-      const content = response.data.choices[0].message.content;
       
       const analysis = {
         promptType,

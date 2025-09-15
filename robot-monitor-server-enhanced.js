@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 const path = require('path');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -15,7 +17,9 @@ const VisionEngine = require('./src/vision/VisionEngine');
 const ModelSelector = require('./src/vision/ModelSelector');
 
 const app = express();
-const PORT = 3001;
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+const PORT = process.env.PORT || 3001;
 
 // Enable CORS and body parsing
 app.use(cors());
@@ -31,8 +35,8 @@ const frameBufferManager = new FrameBufferManager({
 
 // Initialize Vision Engine and Model Selector
 const visionEngine = new VisionEngine({
-    base_url: process.env.VISION_API_URL || 'http://localhost:8080',
-    api_path: '/v1/chat/completions'
+    base_url: process.env.SMOLVLM_API_URL || 'http://localhost:8080',
+    api_path: '/completion'
 });
 
 const modelSelector = new ModelSelector(visionEngine);
@@ -109,9 +113,62 @@ async function stopFrameCaptureIfNoClients() {
     }
 }
 
+// WebSocket handling for chat
+const chatClients = new Set();
+
+wss.on('connection', (ws, req) => {
+    log('New WebSocket client connected', 'INFO');
+    chatClients.add(ws);
+    
+    // Send welcome message
+    ws.send(JSON.stringify({
+        type: 'system',
+        message: 'Connected to Robot Monitor',
+        timestamp: new Date().toISOString()
+    }));
+    
+    // Handle incoming messages
+    ws.on('message', (data) => {
+        try {
+            const message = JSON.parse(data);
+            
+            if (message.type === 'chat') {
+                // Broadcast to all connected clients
+                const broadcastMessage = {
+                    type: 'chat',
+                    message: message.message,
+                    timestamp: new Date().toISOString()
+                };
+                
+                const messageString = JSON.stringify(broadcastMessage);
+                chatClients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        client.send(messageString);
+                    }
+                });
+                
+                log(`Chat message: ${message.message}`, 'INFO');
+            }
+        } catch (error) {
+            log(`WebSocket message error: ${error.message}`, 'ERROR');
+        }
+    });
+    
+    // Handle disconnection
+    ws.on('close', () => {
+        chatClients.delete(ws);
+        log('WebSocket client disconnected', 'INFO');
+    });
+    
+    ws.on('error', (error) => {
+        log(`WebSocket error: ${error.message}`, 'ERROR');
+        chatClients.delete(ws);
+    });
+});
+
 // Main page - serve the enhanced robot monitor
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(__dirname, 'robot-monitor.html'));
 });
 
 // Model Management Endpoints
@@ -270,7 +327,19 @@ app.post('/analyze', async (req, res) => {
         };
         
         // Analyze with specified model
-        const analysis = await visionEngine.analyzeFrame(frameData, prompt, { model });
+        let analysis;
+        try {
+            log(`Sending vision request to ${visionEngine.baseUrl}${visionEngine.apiPath}`, 'DEBUG');
+            log(`Image data length: ${frameData.image.length}`, 'DEBUG');
+            analysis = await visionEngine.analyzeFrame(frameData, prompt, { model });
+        } catch (error) {
+            log(`Vision API error: ${error.message}`, 'ERROR');
+            if (error.response) {
+                log(`Response status: ${error.response.status}`, 'ERROR');
+                log(`Response data: ${JSON.stringify(error.response.data)}`, 'ERROR');
+            }
+            throw error;
+        }
         
         // Format response to match expected structure
         const response = {
@@ -638,7 +707,7 @@ async function startServer() {
         // Optimize for hardware
         visionEngine.optimizeForHardware();
         
-        app.listen(PORT, () => {
+        server.listen(PORT, () => {
             console.log('\n🚀 Robot Overhead Monitor - AI-Enhanced Multi-Model Server');
             console.log('═══════════════════════════════════════════════════════');
             console.log(`📹 Monitor Interface: http://localhost:${PORT}`);

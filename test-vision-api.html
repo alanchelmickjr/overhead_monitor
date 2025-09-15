@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vision API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        button:hover {
+            background: #357abd;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            white-space: pre-wrap;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+    </style>
+</head>
+<body>
+    <h1>Vision API Test</h1>
+    
+    <button onclick="testDirect()">Test Direct LLaMA API (port 8080)</button>
+    <button onclick="testEnhanced()">Test Enhanced Server (port 3001)</button>
+    <button onclick="testPublic()">Test Public Interface (port 4040)</button>
+    
+    <div id="result"></div>
+    
+    <script>
+        const resultDiv = document.getElementById('result');
+        
+        async function testDirect() {
+            resultDiv.innerHTML = 'Testing direct LLaMA API on port 8080...';
+            
+            try {
+                // First capture a frame
+                const frameResponse = await fetch('http://localhost:3001/snapshot.jpg');
+                const blob = await frameResponse.blob();
+                const reader = new FileReader();
+                
+                const base64 = await new Promise((resolve, reject) => {
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                
+                // Remove data URL prefix for llama.cpp
+                const base64Data = base64.replace(/^data:image\/[a-z]+;base64,/, '');
+                
+                // Test direct llama.cpp API
+                const response = await fetch('http://localhost:8080/completion', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: "Describe what you see in this image in one sentence.",
+                        image_data: [{
+                            data: base64Data,
+                            id: 1
+                        }],
+                        n_predict: 50,
+                        temperature: 0.7,
+                        cache_prompt: true,
+                        slot_id: -1
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                resultDiv.innerHTML = `<span class="success">✓ Direct API Working!</span>\n\nResponse:\n${JSON.stringify(data, null, 2)}`;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">✗ Direct API Error:</span>\n${error.message}`;
+            }
+        }
+        
+        async function testEnhanced() {
+            resultDiv.innerHTML = 'Testing enhanced server on port 3001...';
+            
+            try {
+                // First capture a frame
+                const frameResponse = await fetch('http://localhost:3001/snapshot.jpg');
+                const blob = await frameResponse.blob();
+                const reader = new FileReader();
+                
+                const base64 = await new Promise((resolve, reject) => {
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                
+                // Test enhanced server /analyze endpoint
+                const response = await fetch('http://localhost:3001/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: base64,
+                        prompt: "Describe what you see in this image in one sentence.",
+                        apiUrl: 'http://localhost:8080',
+                        model: 'smolvlm-500m'
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${error}`);
+                }
+                
+                const data = await response.json();
+                resultDiv.innerHTML = `<span class="success">✓ Enhanced Server Working!</span>\n\nResponse:\n${JSON.stringify(data, null, 2)}`;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">✗ Enhanced Server Error:</span>\n${error.message}`;
+            }
+        }
+        
+        async function testPublic() {
+            resultDiv.innerHTML = 'Testing public interface on port 4040...';
+            
+            try {
+                const response = await fetch('http://localhost:4040/stream.mjpeg');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                // Just check if we can connect to the stream
+                resultDiv.innerHTML = `<span class="success">✓ Public Interface Working!</span>\n\nVideo stream accessible at:\nhttp://localhost:4040/stream.mjpeg\n\nChat interface at:\nhttp://localhost:4040`;
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<span class="error">✗ Public Interface Error:</span>\n${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -3,7 +3,6 @@ version: "2"
 authtoken: 32ipFmxLQwKp5I7UdGYFgenl54X_miTjKnXQ4LuswLf23muX
 
 # Agent configuration
-web_addr: 127.0.0.1:4040
 console_ui: false
 log_level: info
 region: us
@@ -17,7 +16,7 @@ tunnels:
     
   robot-monitor:
     proto: http
-    addr: 3001
+    addr: 4040
     inspect: false
     
   llava-api:

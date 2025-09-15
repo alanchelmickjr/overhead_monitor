@@ -1088,7 +1088,7 @@
             
             try {
                 // Capture test frame
-                const response = await fetch('http://localhost:3001/snapshot.jpg');
+                const response = await fetch('http://localhost:3000/snapshot.jpg');
                 if (!response.ok) throw new Error('Failed to capture test frame');
                 
                 const blob = await response.blob();
