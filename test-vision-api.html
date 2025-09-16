@@ -39,7 +39,7 @@
     <h1>Vision API Test</h1>
     
     <button onclick="testDirect()">Test Direct LLaMA API (port 8080)</button>
-    <button onclick="testEnhanced()">Test Enhanced Server (port 3001)</button>
+    <button onclick="testEnhanced()">Test Enhanced Server (port 3000)</button>
     <button onclick="testPublic()">Test Public Interface (port 4040)</button>
     
     <div id="result"></div>
@@ -52,7 +52,7 @@
             
             try {
                 // First capture a frame
-                const frameResponse = await fetch('http://localhost:3001/snapshot.jpg');
+                const frameResponse = await fetch('http://localhost:3000/snapshot.jpg');
                 const blob = await frameResponse.blob();
                 const reader = new FileReader();
                 
@@ -97,11 +97,11 @@
         }
         
         async function testEnhanced() {
-            resultDiv.innerHTML = 'Testing enhanced server on port 3001...';
+            resultDiv.innerHTML = 'Testing enhanced server on port 3000...';
             
             try {
                 // First capture a frame
-                const frameResponse = await fetch('http://localhost:3001/snapshot.jpg');
+                const frameResponse = await fetch('http://localhost:3000/snapshot.jpg');
                 const blob = await frameResponse.blob();
                 const reader = new FileReader();
                 
@@ -112,7 +112,7 @@
                 });
                 
                 // Test enhanced server /analyze endpoint
-                const response = await fetch('http://localhost:3001/analyze', {
+                const response = await fetch('http://localhost:3000/analyze', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'

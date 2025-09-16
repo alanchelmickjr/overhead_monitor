@@ -21,7 +21,7 @@ const TEST_CONFIG = {
         {
             name: 'rtsp-proxy',
             script: 'rtsp-proxy.js',
-            port: 3001,
+            port: 3000,
             features: ['basic', 'multi-client', 'buffering']
         },
         {

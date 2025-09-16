@@ -19,12 +19,12 @@ const ModelSelector = require('./src/vision/ModelSelector');
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // Enable CORS and body parsing
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
-app.use(express.static('public'));
+// Removed express.static('public') - we serve specific HTML file only
 
 // Initialize frame capture components
 const frameCaptureService = new FrameCaptureService();
@@ -113,62 +113,27 @@ async function stopFrameCaptureIfNoClients() {
     }
 }
 
-// WebSocket handling for chat
-const chatClients = new Set();
-
+// NO CHAT on port 3000 - This is internal monitoring only
+// Chat is exclusively on port 4040 (public server)
+// Internal team can yell at each other or throw screwdrivers :)
 wss.on('connection', (ws, req) => {
-    log('New WebSocket client connected', 'INFO');
-    chatClients.add(ws);
+    log('WebSocket connection on internal port 3000 - no chat here', 'INFO');
     
-    // Send welcome message
-    ws.send(JSON.stringify({
-        type: 'system',
-        message: 'Connected to Robot Monitor',
-        timestamp: new Date().toISOString()
-    }));
+    // This WebSocket is only for internal monitoring updates if needed
+    // No chat functionality on internal port
     
-    // Handle incoming messages
-    ws.on('message', (data) => {
-        try {
-            const message = JSON.parse(data);
-            
-            if (message.type === 'chat') {
-                // Broadcast to all connected clients
-                const broadcastMessage = {
-                    type: 'chat',
-                    message: message.message,
-                    timestamp: new Date().toISOString()
-                };
-                
-                const messageString = JSON.stringify(broadcastMessage);
-                chatClients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(messageString);
-                    }
-                });
-                
-                log(`Chat message: ${message.message}`, 'INFO');
-            }
-        } catch (error) {
-            log(`WebSocket message error: ${error.message}`, 'ERROR');
-        }
-    });
-    
-    // Handle disconnection
     ws.on('close', () => {
-        chatClients.delete(ws);
-        log('WebSocket client disconnected', 'INFO');
+        log('Internal WebSocket disconnected', 'INFO');
     });
     
     ws.on('error', (error) => {
-        log(`WebSocket error: ${error.message}`, 'ERROR');
-        chatClients.delete(ws);
+        log(`Internal WebSocket error: ${error.message}`, 'ERROR');
     });
 });
 
-// Main page - serve the enhanced robot monitor
+// Main page - serve the LeKiwi Pen Nanny Cam page (internal control)
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'robot-monitor.html'));
+    res.sendFile(path.join(__dirname, 'test-camera-stream-llava.html'));
 });
 
 // Model Management Endpoints

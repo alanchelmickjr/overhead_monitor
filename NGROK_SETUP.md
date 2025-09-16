@@ -40,23 +40,23 @@ open http://localhost:4040
 
 ### Local Access (always available):
 - **Camera Viewer**: http://localhost:3000
-- **Robot Monitor**: http://localhost:3001
+- **Model Comparison**: http://localhost:3000
 - **LLaVA API**: http://localhost:8080/v1/chat/completions
-- **ngrok Dashboard**: http://localhost:4040
+- **Public Robot Monitor**: http://localhost:4040
 
 ### Remote Access (when ngrok is running):
 Your public URLs will be displayed when you run `./start-all.sh`
 
 Example URLs:
 - Camera: `https://abc123.ngrok-free.app` → localhost:3000
-- Robot: `https://def456.ngrok-free.app` → localhost:3001
+- Robot: `https://def456.ngrok-free.app` → localhost:4040
 - API: `https://ghi789.ngrok-free.app` → localhost:8080
 
 ## 🛠️ Configuration Details
 
 The `ngrok.yml` file defines tunnels for:
 - `camera-viewer`: Main UI interface (port 3000)
-- `robot-monitor`: LeKiwi pen monitoring and RTSP proxy (port 3001)
+- `robot-monitor`: LeKiwi pen monitoring and RTSP proxy (port 4040)
 - `llava-api`: Vision AI API endpoint (port 8080)
 
 Each tunnel:

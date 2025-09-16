@@ -12,15 +12,20 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const PORT = 4040;
-const MAIN_SERVER = 'http://localhost:3001';
-const STREAM_SERVER = 'http://localhost:3001';
+const MAIN_SERVER = 'http://localhost:3000';  // Stream from internal server
+const STREAM_SERVER = 'http://localhost:3000'; // Stream from internal server
 
 // Enable CORS
 app.use(cors());
 app.use(express.json());
 
-// Track connected chat clients
-const chatClients = new Set();
+// Track connected chat clients properly
+const chatClients = new Map(); // Better tracking with Map
+let clientIdCounter = 0;
+
+// Heartbeat configuration for connection health
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const HEARTBEAT_TIMEOUT = 60000;  // 60 seconds timeout
 
 // Simple logging
 function log(message, level = 'INFO') {
@@ -37,7 +42,7 @@ app.get('/', (req, res) => {
 app.get('/stream.mjpeg', (req, res) => {
     log('Proxying video stream request');
     
-    // Proxy the stream from stream server (port 3001)
+    // Proxy the stream from stream server (port 3000)
     fetch(`${STREAM_SERVER}/stream.mjpeg`)
         .then(response => {
             // Forward headers
@@ -94,17 +99,53 @@ app.get('/events', async (req, res) => {
     }
 });
 
-// WebSocket for chat functionality
+// WebSocket for chat functionality - PUBLIC PORT 4040 ONLY
 wss.on('connection', (ws, req) => {
-    log('New chat client connected');
-    chatClients.add(ws);
+    const clientId = ++clientIdCounter;
+    log(`New chat client connected: #${clientId}`);
     
-    // Send welcome message
-    ws.send(JSON.stringify({
-        type: 'system',
-        message: 'Connected to Robot Monitor chat',
-        timestamp: new Date().toISOString()
-    }));
+    // Add client with metadata
+    const clientInfo = {
+        id: clientId,
+        ws: ws,
+        isAlive: true,
+        lastPing: Date.now(),
+        connectedAt: new Date()
+    };
+    chatClients.set(clientId, clientInfo);
+    
+    // Set up heartbeat
+    ws.isAlive = true;
+    ws.on('pong', () => {
+        ws.isAlive = true;
+        clientInfo.lastPing = Date.now();
+    });
+    
+    // Send welcome message - with retry logic
+    const sendWelcome = () => {
+        try {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'system',
+                    message: 'Connected to Robot Monitor chat',
+                    timestamp: new Date().toISOString(),
+                    clientId: clientId
+                }));
+                log(`Welcome message sent to client #${clientId}`);
+            } else {
+                log(`Client #${clientId} not ready for welcome message`, 'WARNING');
+            }
+        } catch (error) {
+            log(`Failed to send welcome to client #${clientId}: ${error.message}`, 'ERROR');
+        }
+    };
+    
+    // Send welcome immediately if ready, or wait a bit
+    if (ws.readyState === WebSocket.OPEN) {
+        sendWelcome();
+    } else {
+        setTimeout(sendWelcome, 100);
+    }
     
     // Handle incoming messages
     ws.on('message', (data) => {
@@ -116,79 +157,68 @@ wss.on('connection', (ws, req) => {
                 const broadcastMessage = {
                     type: 'chat',
                     message: message.message,
-                    timestamp: new Date().toISOString()
+                    timestamp: new Date().toISOString(),
+                    from: `User${clientId}`
                 };
                 
                 const messageString = JSON.stringify(broadcastMessage);
-                chatClients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(messageString);
+                let sentCount = 0;
+                
+                chatClients.forEach((client, id) => {
+                    if (client.ws.readyState === WebSocket.OPEN) {
+                        try {
+                            client.ws.send(messageString);
+                            sentCount++;
+                        } catch (error) {
+                            log(`Failed to send to client #${id}: ${error.message}`, 'ERROR');
+                        }
                     }
                 });
                 
-                log(`Chat message: ${message.message}`);
+                log(`Chat message from #${clientId}: "${message.message}" (sent to ${sentCount} clients)`);
+            } else if (message.type === 'ping') {
+                // Handle client ping
+                ws.send(JSON.stringify({ type: 'pong' }));
             }
         } catch (error) {
-            log(`WebSocket message error: ${error.message}`, 'ERROR');
+            log(`WebSocket message error from client #${clientId}: ${error.message}`, 'ERROR');
         }
     });
     
     // Handle disconnection
     ws.on('close', () => {
-        chatClients.delete(ws);
-        log('Chat client disconnected');
+        chatClients.delete(clientId);
+        log(`Chat client disconnected: #${clientId}`);
     });
     
     ws.on('error', (error) => {
-        log(`WebSocket error: ${error.message}`, 'ERROR');
-        chatClients.delete(ws);
+        log(`WebSocket error for client #${clientId}: ${error.message}`, 'ERROR');
+        chatClients.delete(clientId);
     });
 });
 
-// Connect to main server's WebSocket for events (read-only)
-function connectToMainServer() {
-    const mainWs = new WebSocket('ws://localhost:3001');
-    
-    mainWs.on('open', () => {
-        log('Connected to main server for events');
-    });
-    
-    mainWs.on('message', (data) => {
-        try {
-            const message = JSON.parse(data);
-            
-            // Forward only event_detected messages to public clients
-            if (message.type === 'event_detected') {
-                const publicEvent = {
-                    type: 'event',
-                    event: {
-                        type: message.event.type,
-                        message: message.event.summary || message.event.type,
-                        timestamp: message.timestamp
-                    }
-                };
-                
-                const eventString = JSON.stringify(publicEvent);
-                chatClients.forEach(client => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(eventString);
-                    }
-                });
-            }
-        } catch (error) {
-            // Ignore parsing errors
+// Heartbeat interval to detect dead connections
+const heartbeatInterval = setInterval(() => {
+    chatClients.forEach((client, id) => {
+        if (client.ws.isAlive === false) {
+            log(`Terminating dead client #${id}`);
+            client.ws.terminate();
+            chatClients.delete(id);
+            return;
         }
+        
+        client.ws.isAlive = false;
+        client.ws.ping();
     });
-    
-    mainWs.on('close', () => {
-        log('Disconnected from main server, reconnecting...');
-        setTimeout(connectToMainServer, 5000);
-    });
-    
-    mainWs.on('error', (error) => {
-        log(`Main server connection error: ${error.message}`, 'ERROR');
-    });
-}
+}, HEARTBEAT_INTERVAL);
+
+// Clean up on server close
+wss.on('close', () => {
+    clearInterval(heartbeatInterval);
+});
+
+// Don't connect to main server for events - keep chat standalone on 4040
+// Events can be manually sent if needed via the chat system itself
 
 // Start server
 server.listen(PORT, () => {
@@ -204,18 +234,22 @@ server.listen(PORT, () => {
     console.log('  • Video controls & recording');
     console.log('\n✅ Public server ready!\n');
     
-    // Connect to main server for events
-    connectToMainServer();
+    // Chat runs standalone on port 4040 - no connection to internal server needed
+    log('Chat system ready on port 4040 - standalone operation');
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
     log('Shutting down public server...');
     
-    // Close all WebSocket connections
-    chatClients.forEach(client => {
-        client.close();
+    // Close all WebSocket connections properly
+    chatClients.forEach((client, id) => {
+        log(`Closing connection for client #${id}`);
+        client.ws.close();
     });
+    chatClients.clear();
+    
+    clearInterval(heartbeatInterval);
     
     wss.close(() => {
         server.close(() => {

@@ -87,7 +87,7 @@ let ballState = {
 ## Integration Points
 
 ### Camera Server
-- Uses existing camera stream at `http://localhost:3001/stream.mjpeg`
+- Uses existing camera stream at `http://localhost:3000/stream.mjpeg`
 - Captures snapshots via `/snapshot.jpg` endpoint
 - Proxy endpoint `/analyze` for AI model communication
 

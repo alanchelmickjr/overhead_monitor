@@ -26,7 +26,7 @@ const TEST_CONFIG = {
         {
             name: 'rtsp-proxy',
             script: 'rtsp-proxy.js',
-            port: 3001,
+            port: 3000,
             startDelay: 2000
         },
         {
@@ -244,7 +244,7 @@ class RefactoredSystemTestRunner {
         this.log('Open test/test-client-integration.html in a browser to run', 'INFO');
         this.log(`Servers are running at:`, 'INFO');
         this.log(`  - http://localhost:3000 (robot-monitor-server)`, 'INFO');
-        this.log(`  - http://localhost:3001 (rtsp-proxy)`, 'INFO');
+        this.log(`  - http://localhost:3000 (rtsp-proxy)`, 'INFO');
         this.log(`  - http://localhost:3002 (robot-monitor-server-enhanced)`, 'INFO');
         
         // Return placeholder results

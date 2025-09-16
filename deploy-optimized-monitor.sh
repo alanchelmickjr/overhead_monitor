@@ -229,7 +229,7 @@ module.exports = {
       autorestart: true,
       watch: false,
       env: {
-        RTSP_PROXY_PORT: 3001
+        RTSP_PROXY_PORT: 3000
       }
     }
   ]
@@ -292,7 +292,7 @@ create_shortcuts() {
 #!/bin/bash
 echo "🚀 Starting Overhead Monitor..."
 echo "Dashboard: http://localhost:3000"
-echo "Camera Stream: http://localhost:3001/stream.mjpeg"
+echo "Camera Stream: http://localhost:3000/stream.mjpeg"
 echo ""
 
 # Start services if not running
@@ -356,7 +356,7 @@ show_summary() {
     echo "🔗 Access Points:"
     echo "  • Dashboard: http://localhost:3000"
     echo "  • Health Check: http://localhost:3000/health"
-    echo "  • Camera Stream: http://localhost:3001/stream.mjpeg"
+    echo "  • Camera Stream: http://localhost:3000/stream.mjpeg"
     echo "  • API Docs: http://localhost:3000/api/docs"
     echo ""
     echo "📝 Quick Commands:"

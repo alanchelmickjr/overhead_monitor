@@ -15,7 +15,7 @@ const FrameCaptureService = require('./src/camera/FrameCaptureService');
 const FrameBufferManager = require('./src/camera/FrameBufferManager');
 
 const app = express();
-const PORT = process.env.RTSP_PROXY_PORT || 3001;
+const PORT = process.env.RTSP_PROXY_PORT || 3000;
 
 // Enable CORS for all origins
 app.use(cors());

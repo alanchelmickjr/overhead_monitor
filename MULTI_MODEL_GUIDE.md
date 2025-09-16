@@ -62,7 +62,7 @@ VISION_API_URL=http://your-server:8080 node robot-monitor-server-enhanced.js
 
 ### 2. Access the Web Interface
 
-Open your browser to: `http://localhost:3001`
+Open your browser to: `http://localhost:3000`
 
 ### 3. Select a Model
 

@@ -314,9 +314,8 @@ install_node_deps
 
 # Kill any existing processes
 echo -e "${YELLOW}🧹 Cleaning up existing processes...${NC}"
-pkill -f "node.*server.js" || true
-pkill -f "node.*camera-server.js" || true
-pkill -f "node.*robot-monitor-server.js" || true
+pkill -f "node.*robot-monitor-server-enhanced.js" || true
+pkill -f "node.*robot-monitor-public-server.js" || true
 pkill -f "llama-server" || true
 pkill -f "ngrok" || true
 sleep 2
@@ -362,23 +361,15 @@ fi
 # Start camera monitoring services directly
 echo -e "${BLUE}📹 Starting camera monitoring services...${NC}"
 
-# Start camera server
-if [ -f "camera-server.js" ]; then
-    node camera-server.js &
-    CAMERA_PID=$!
-fi
-
-# Start robot monitor - use enhanced version with multi-model support
-# Note: The enhanced version includes RTSP proxy functionality, so we don't need separate rtsp-proxy.js
+# Start ONLY the enhanced robot monitor on port 3000 (internal control server)
+# This includes ALL camera, RTSP proxy, and AI vision features
 if [ -f "robot-monitor-server-enhanced.js" ]; then
-    log_info "Starting enhanced robot monitor with multi-model support (includes RTSP proxy)..."
-    node robot-monitor-server-enhanced.js &
+    log_info "Starting enhanced robot monitor on port 3000 (internal control)..."
+    PORT=3000 node robot-monitor-server-enhanced.js &
     ROBOT_PID=$!
-elif [ -f "rtsp-proxy.js" ]; then
-    # Fallback to simple RTSP proxy if enhanced version not available
-    log_info "Starting RTSP proxy..."
-    node rtsp-proxy.js &
-    RTSP_PID=$!
+else
+    log_error "robot-monitor-server-enhanced.js not found!"
+    exit 1
 fi
 
 # Start public monitor server
@@ -388,21 +379,16 @@ if [ -f "robot-monitor-public-server.js" ]; then
     PUBLIC_PID=$!
 fi
 
-# Wait for camera services to be ready
-if wait_for_service 3000 "camera viewer" 30; then
-    echo -e "${GREEN}✅ Camera viewer started successfully${NC}"
+# Wait for services to be ready
+if wait_for_service 3000 "Enhanced Robot Monitor (internal control)" 30; then
+    echo -e "${GREEN}✅ Enhanced Robot Monitor started successfully on port 3000${NC}"
 else
-    echo -e "${YELLOW}⚠️  Camera viewer may not be ready yet${NC}"
+    echo -e "${RED}❌ Failed to start Enhanced Robot Monitor${NC}"
+    exit 1
 fi
 
-if wait_for_service 3001 "RTSP proxy" 30; then
-    echo -e "${GREEN}✅ RTSP proxy started successfully${NC}"
-else
-    echo -e "${YELLOW}⚠️  RTSP proxy may not be ready yet${NC}"
-fi
-
-if wait_for_service 4040 "Public monitor server" 30; then
-    echo -e "${GREEN}✅ Public monitor server started successfully${NC}"
+if wait_for_service 4040 "Public monitor server (read-only viewer)" 30; then
+    echo -e "${GREEN}✅ Public monitor server started successfully on port 4040${NC}"
 else
     echo -e "${YELLOW}⚠️  Public monitor server may not be ready yet${NC}"
 fi
@@ -417,9 +403,8 @@ echo -e "${BLUE}📊 Service Status Check${NC}"
 echo "========================================"
 
 check_service 8080 "llama.cpp server"
-check_service 3000 "Camera viewer"
-check_service 3001 "RTSP proxy"
-check_service 4040 "Public monitor server"
+check_service 3000 "Enhanced Robot Monitor (internal)"
+check_service 4040 "Public monitor server (public viewer)"
 if [[ "$SKIP_NGROK" != "true" ]]; then
     check_service 4040 "ngrok web interface"
 fi
@@ -430,10 +415,8 @@ echo -e "${GREEN}🎉 System Ready!${NC}"
 echo "========================================"
 echo ""
 echo -e "${GREEN}📱 Local Access Points:${NC}"
-echo "   • Camera viewer: http://localhost:3000"
-echo "   • RTSP proxy/Robot Monitor: http://localhost:3001"
-echo "   • Public monitor: http://localhost:4040"
-echo "   • LLaVA test: http://localhost:3000"
+echo "   • Internal Control (PRIVATE): http://localhost:3000"
+echo "   • Public Viewer (SHARED): http://localhost:4040"
 echo "   • LLaVA API: http://localhost:8080/v1/chat/completions"
 if [[ "$SKIP_NGROK" != "true" ]]; then
     echo "   • ngrok dashboard: http://localhost:4040"
@@ -457,7 +440,7 @@ echo -e "${YELLOW}🛑 Press Ctrl+C to stop all services${NC}"
 echo ""
 
 # Trap to cleanup on exit
-trap 'echo -e "\n${YELLOW}🛑 Shutting down services...${NC}"; pkill -f "llama-server" || true; pkill -f "node.*server.js" || true; pkill -f "node.*camera-server.js" || true; pkill -f "node.*robot-monitor-server.js" || true; pkill -f "ngrok" || true; echo -e "${GREEN}✅ All services stopped${NC}"; exit 0' INT TERM
+trap 'echo -e "\n${YELLOW}🛑 Shutting down services...${NC}"; pkill -f "llama-server" || true; pkill -f "node.*robot-monitor-server-enhanced.js" || true; pkill -f "node.*robot-monitor-public-server.js" || true; pkill -f "ngrok" || true; echo -e "${GREEN}✅ All services stopped${NC}"; exit 0' INT TERM
 
 # Keep the script running and monitor services
 while true; do
@@ -470,7 +453,7 @@ while true; do
     fi
     
     if ! lsof -Pi :3000 -sTCP:LISTEN -t >/dev/null 2>&1; then
-        echo -e "${RED}❌ Camera viewer stopped unexpectedly${NC}"
+        echo -e "${RED}❌ Enhanced Robot Monitor stopped unexpectedly${NC}"
         break
     fi
     

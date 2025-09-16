@@ -15,7 +15,7 @@ fi
 
 # Check if RTSP proxy is running
 echo "Checking RTSP proxy..."
-if curl -s http://localhost:3001/status > /dev/null 2>&1; then
+if curl -s http://localhost:3000/status > /dev/null 2>&1; then
     echo "✅ RTSP proxy is running"
 else
     echo "⚠️  RTSP proxy not running!"

@@ -11,7 +11,7 @@
 
 ### 🔧 Issues Fixed:
 1. **Script permissions** - Fixed by adding execute permissions to startup scripts
-2. **Video stream port** - Fixed by updating proxy to use correct stream server on port 3001
+2. **Video stream port** - Fixed by updating proxy to use correct stream server on port 3000
 3. **WebSocket errors** - These are non-critical and don't affect functionality
 
 ## Quick Start Instructions
@@ -40,11 +40,11 @@ This will:
 ## Key Configuration Details
 
 ### Important Ports:
-- **Port 3000**: Main robot monitor interface
-- **Port 3001**: MJPEG video stream server (RTSP proxy)
+- **Port 3000**: AI Robot Monitor ie: Nanny Cam
+- **Port 300o**: MJPEG video stream server (RTSP proxy)
 - **Port 4040**: Public monitor interface
 
-The public server was updated to correctly proxy the video stream from port 3001 instead of 3000.
+The public server was updated to correctly proxy the video stream from port 3000.
 
 ## Architecture Notes
 

@@ -696,32 +696,136 @@
         let recordedChunks = [];
         let isRecording = false;
         
-        // Initialize WebSocket connection
+        // Connection management
+        let reconnectAttempts = 0;
+        let maxReconnectAttempts = 10;
+        let reconnectDelay = 1000; // Start with 1 second
+        let reconnectTimer = null;
+        let pingInterval = null;
+        let connectionState = 'disconnected';
+        
+        // Initialize WebSocket connection with proper management
         function initWebSocket() {
+            // Clear any existing connection
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            // Clear timers
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
+            
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}`);
+            const wsUrl = `${protocol}//${window.location.host}`;
+            
+            console.log(`Attempting WebSocket connection to: ${wsUrl}`);
+            connectionState = 'connecting';
+            updateConnectionStatus('Connecting...', false);
+            
+            try {
+                ws = new WebSocket(wsUrl);
+            } catch (error) {
+                console.error('Failed to create WebSocket:', error);
+                scheduleReconnect();
+                return;
+            }
+            
+            // Set connection timeout
+            const connectionTimeout = setTimeout(() => {
+                if (connectionState === 'connecting') {
+                    console.log('Connection timeout - closing and retrying');
+                    ws.close();
+                }
+            }, 5000);
             
             ws.onopen = () => {
-                console.log('WebSocket connected');
+                clearTimeout(connectionTimeout);
+                console.log('✅ WebSocket connected successfully');
+                connectionState = 'connected';
+                reconnectAttempts = 0;
+                reconnectDelay = 1000; // Reset delay
                 updateConnectionStatus('Connected', true);
+                
+                // Start ping interval to keep connection alive
+                startPingInterval();
+                
+                // Announce connection
+                addChatMessage('Chat connected!', new Date().toISOString(), true);
             };
             
             ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                handleWebSocketMessage(data);
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                    
+                    // Log welcome message specifically
+                    if (data.type === 'system' && data.message.includes('Connected to Robot Monitor chat')) {
+                        console.log('✅ Received welcome message from server');
+                    }
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                }
             };
             
             ws.onerror = (error) => {
+                clearTimeout(connectionTimeout);
                 console.error('WebSocket error:', error);
+                connectionState = 'error';
                 updateConnectionStatus('Connection error', false);
             };
             
-            ws.onclose = () => {
-                console.log('WebSocket disconnected');
+            ws.onclose = (event) => {
+                clearTimeout(connectionTimeout);
+                console.log(`WebSocket disconnected: Code ${event.code}, Reason: ${event.reason}`);
+                connectionState = 'disconnected';
                 updateConnectionStatus('Disconnected', false);
-                // Reconnect after 3 seconds
-                setTimeout(initWebSocket, 3000);
+                
+                // Clear ping interval
+                if (pingInterval) {
+                    clearInterval(pingInterval);
+                    pingInterval = null;
+                }
+                
+                // Schedule reconnect with exponential backoff
+                scheduleReconnect();
             };
+        }
+        
+        // Schedule reconnection with exponential backoff
+        function scheduleReconnect() {
+            if (reconnectAttempts >= maxReconnectAttempts) {
+                console.error('Max reconnection attempts reached');
+                updateConnectionStatus('Connection failed - please refresh', false);
+                addChatMessage('Connection lost. Please refresh the page.', new Date().toISOString(), true);
+                return;
+            }
+            
+            reconnectAttempts++;
+            const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts - 1), 30000); // Max 30 seconds
+            
+            console.log(`Scheduling reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts} in ${delay}ms`);
+            updateConnectionStatus(`Reconnecting in ${Math.round(delay/1000)}s...`, false);
+            
+            reconnectTimer = setTimeout(() => {
+                console.log(`Reconnect attempt ${reconnectAttempts}...`);
+                initWebSocket();
+            }, delay);
+        }
+        
+        // Start ping interval to keep connection alive
+        function startPingInterval() {
+            if (pingInterval) {
+                clearInterval(pingInterval);
+            }
+            
+            pingInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, 25000); // Ping every 25 seconds
         }
         
         // Handle incoming WebSocket messages
@@ -735,17 +839,36 @@
             }
         }
         
-        // Send chat message
+        // Send chat message with connection check
         function sendMessage() {
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
             
-            if (message && ws && ws.readyState === WebSocket.OPEN) {
+            if (!message) {
+                return;
+            }
+            
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('Cannot send message - not connected');
+                addChatMessage('Error: Not connected to chat. Please wait...', new Date().toISOString(), true);
+                
+                // Try to reconnect
+                if (connectionState === 'disconnected') {
+                    initWebSocket();
+                }
+                return;
+            }
+            
+            try {
                 ws.send(JSON.stringify({
                     type: 'chat',
                     message: message
                 }));
                 input.value = '';
+                console.log(`Sent message: "${message}"`);
+            } catch (error) {
+                console.error('Failed to send message:', error);
+                addChatMessage('Failed to send message. Please try again.', new Date().toISOString(), true);
             }
         }
         
@@ -944,10 +1067,28 @@
             };
         }
         
-        // Initialize on load
+        // Initialize on load with delay to ensure DOM is ready
         window.onload = () => {
-            initWebSocket();
-            checkStreamStatus();
+            console.log('🚀 Robot Monitor starting...');
+            
+            // Small delay to ensure everything is ready
+            setTimeout(() => {
+                initWebSocket();
+                checkStreamStatus();
+            }, 100);
+        };
+        
+        // Clean up on page unload
+        window.onbeforeunload = () => {
+            if (ws) {
+                ws.close();
+            }
+            if (pingInterval) {
+                clearInterval(pingInterval);
+            }
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+            }
         };
     </script>
 </body>

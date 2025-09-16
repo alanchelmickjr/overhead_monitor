@@ -148,7 +148,7 @@ POST /analyze
 # Start the enhanced server
 node robot-monitor-server-enhanced.js
 
-# Open browser to http://localhost:3001
+# Open browser to http://localhost:3000
 ```
 
 ### Model Switching

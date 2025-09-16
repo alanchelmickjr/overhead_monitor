@@ -37,7 +37,7 @@ The llama.cpp server should now be running at `http://localhost:8080`
 node rtsp-proxy.js
 ```
 
-This will start a proxy server on `http://localhost:3001`
+This will start a proxy server on `http://localhost:3000`
 
 ## Step 4: Open the Camera Viewer
 
@@ -45,7 +45,7 @@ This will start a proxy server on `http://localhost:3001`
 Simply open `camera-viewer.html` in your browser
 
 ### Option B: Via the Proxy Server
-Navigate to `http://localhost:3001` in your browser
+Navigate to `http://localhost:3000` in your browser
 
 ## Step 5: Connect to Your Camera
 
@@ -63,7 +63,7 @@ Try these alternative methods:
 
 #### Method 2: MJPEG Stream via Proxy
 - Change protocol to "MJPEG Stream"  
-- URL: `http://localhost:3001/stream.mjpeg`
+- URL: `http://localhost:3000/stream.mjpeg`
 
 ## Step 6: Start Analysis
 
@@ -82,7 +82,7 @@ Test your camera URLs:
 ffmpeg -rtsp_transport tcp -i rtsp://192.168.88.40:554/stream1 -t 5 -f null -
 
 # Test all common RTSP paths
-curl http://localhost:3001/test-rtsp
+curl http://localhost:3000/test-rtsp
 ```
 
 Common RTSP URLs for IP cameras:

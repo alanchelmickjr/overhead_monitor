@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
 // Health check for proxy
 app.get('/proxy-status', async (req, res) => {
     try {
-        const response = await fetch('http://localhost:3001/status');
+        const response = await fetch('http://localhost:3000/status');
         const data = await response.json();
         res.json({ proxyRunning: true, ...data });
     } catch (error) {
@@ -31,7 +31,7 @@ app.listen(PORT, () => {
     console.log('\n🚀 Robot Overhead Monitor');
     console.log('═══════════════════════════════════════════');
     console.log(`📹 Camera Interface: http://localhost:${PORT}`);
-    console.log(`🔄 RTSP Proxy: http://localhost:3001`);
+    console.log(`🔄 RTSP Proxy: http://localhost:3000`);
     console.log('═══════════════════════════════════════════');
     console.log('\nCamera Credentials:');
     console.log('  Username: LeKiwi');
@@ -43,9 +43,9 @@ app.listen(PORT, () => {
 // Check if proxy is running
 setTimeout(async () => {
     try {
-        const response = await fetch('http://localhost:3001/status');
+        const response = await fetch('http://localhost:3000/status');
         if (response.ok) {
-            console.log('✅ RTSP Proxy is running on port 3001');
+            console.log('✅ RTSP Proxy is running on port 3000');
         }
     } catch (error) {
         console.log('⚠️  RTSP Proxy not detected. Run: node rtsp-proxy-debug.js');

@@ -657,7 +657,7 @@
             <!-- Video Section -->
             <div class="video-section">
                 <div class="video-container">
-                    <img id="stream" src="http://localhost:3001/stream.mjpeg" alt="Camera Stream">
+                    <img id="stream" src="http://localhost:3000/stream.mjpeg" alt="Camera Stream">
                     <canvas id="captureCanvas"></canvas>
                 </div>
                 
@@ -1113,7 +1113,7 @@
                 // Get snapshot from server (avoids CORS nightmare)
                 addLogEntry('Capturing frame from server...', 'info');
                 
-                const response = await fetch('http://localhost:3001/snapshot.jpg');
+                const response = await fetch('http://localhost:3000/snapshot.jpg');
                 if (!response.ok) {
                     throw new Error('Failed to capture snapshot');
                 }
@@ -1171,7 +1171,7 @@
             
             try {
                 // Use proxy endpoint to avoid CORS issues
-                const response = await fetch('http://localhost:3001/analyze', {
+                const response = await fetch('http://localhost:3000/analyze', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1458,7 +1458,7 @@
                 addLogEntry('Capturing frame for custom query...', 'info');
                 
                 // Get snapshot from server
-                const response = await fetch('http://localhost:3001/snapshot.jpg');
+                const response = await fetch('http://localhost:3000/snapshot.jpg');
                 if (!response.ok) {
                     throw new Error('Failed to capture snapshot');
                 }

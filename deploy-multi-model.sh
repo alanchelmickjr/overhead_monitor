@@ -111,7 +111,7 @@ CAMERA_URL=rtsp://LeKiwi:LeKiwi995@192.168.88.40:554/stream1
 # HARDWARE_PROFILE=m4
 
 # Server Port
-PORT=3001
+PORT=3000
 EOF
         echo -e "${GREEN}✓ Created .env file (please update with your settings)${NC}"
     fi
@@ -254,7 +254,7 @@ print_next_steps() {
     echo "3. Start the monitoring system:"
     echo "   ./start-monitor.sh"
     echo ""
-    echo "4. Open http://localhost:3001 in your browser"
+    echo "4. Open http://localhost:3000 in your browser"
     echo ""
     echo "5. (Optional) Run benchmarks to find the best model:"
     echo "   ./benchmark-models.sh"

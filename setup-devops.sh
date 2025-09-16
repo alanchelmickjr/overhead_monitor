@@ -473,7 +473,7 @@ RUN sed -i 's|$HOME/models|/models|g' start-llama-server.sh
 RUN chmod +x *.sh
 
 # Expose ports
-EXPOSE 3000 3001 8080
+EXPOSE 3000 3000 8080
 
 # Start services
 CMD ["./start-all.sh"]
@@ -489,7 +489,7 @@ services:
     container_name: overhead-monitor
     ports:
       - "3000:3000"  # Camera viewer
-      - "3001:3001"  # RTSP proxy
+      - "3000:3000"  # RTSP proxy
       - "8080:8080"  # llama.cpp server
     environment:
       - RTSP_URL=${RTSP_URL:-rtsp://192.168.88.40:554/stream1}
@@ -648,7 +648,7 @@ main() {
     echo ""
     echo "3. Access the interfaces:"
     echo "   - Camera viewer: http://localhost:3000"
-    echo "   - RTSP proxy: http://localhost:3001"
+    echo "   - RTSP proxy: http://localhost:3000"
     echo "   - SmolVLM test: http://localhost:3000/test-camera-stream-smolvlm.html"
     echo ""
     echo "4. Optional: Install as system service (see logs above)"
