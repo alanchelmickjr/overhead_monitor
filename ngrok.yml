@@ -18,6 +18,7 @@ tunnels:
     proto: http
     addr: 4040
     inspect: false
+    hostname: lekiwi.ngrok.io
     
   llava-api:
     proto: http

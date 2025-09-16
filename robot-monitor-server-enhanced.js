@@ -192,7 +192,7 @@ app.post('/models/benchmark', async (req, res) => {
             const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
             if (latestFrame && latestFrame.data) {
                 testFrame = `data:image/jpeg;base64,${latestFrame.data.toString('base64')}`;
-                log('Using latest buffered frame for benchmark', 'INFO');
+                log(`Using latest buffered frame for benchmark (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'INFO');
             } else {
                 return res.status(400).json({ error: 'No test frame provided and no buffered frames available' });
             }
@@ -231,7 +231,7 @@ app.post('/models/compare', async (req, res) => {
             const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
             if (latestFrame && latestFrame.data) {
                 testFrame = `data:image/jpeg;base64,${latestFrame.data.toString('base64')}`;
-                log('Using latest buffered frame for comparison', 'INFO');
+                log(`Using latest buffered frame for comparison (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'INFO');
             } else {
                 return res.status(400).json({ error: 'No test frame provided and no buffered frames available' });
             }
@@ -267,7 +267,7 @@ app.post('/analyze', async (req, res) => {
             const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
             if (latestFrame && latestFrame.data) {
                 image = `data:image/jpeg;base64,${latestFrame.data.toString('base64')}`;
-                log('Using latest buffered frame for analysis', 'INFO');
+                log(`Using latest buffered frame for analysis (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'INFO');
             } else {
                 return res.status(400).json({ error: 'No buffered frames available' });
             }
@@ -295,7 +295,9 @@ app.post('/analyze', async (req, res) => {
         let analysis;
         try {
             log(`Sending vision request to ${visionEngine.baseUrl}${visionEngine.apiPath}`, 'DEBUG');
-            log(`Image data length: ${frameData.image.length}`, 'DEBUG');
+            // Don't log the full base64 image data, just the size
+            const imageSize = frameData.image ? frameData.image.split(',')[0].length : 0;
+            log(`Image data size: ~${Math.round(imageSize / 1024)}KB`, 'DEBUG');
             analysis = await visionEngine.analyzeFrame(frameData, prompt, { model });
         } catch (error) {
             log(`Vision API error: ${error.message}`, 'ERROR');

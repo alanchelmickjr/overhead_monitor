@@ -852,6 +852,13 @@
             alerts: 0
         };
         
+        // Motion detection and throttling
+        let lastMotionTime = null;
+        let motionThrottleTimeout = null;
+        let baseInterval = 30000; // Default 30 seconds
+        let activeInterval = 5000; // Fast interval when motion detected
+        let currentInterval = baseInterval;
+        
         // Frame buffer variables
         let frameHandler = null;
         let frameBufferMode = 'direct';
@@ -1064,18 +1071,24 @@
             adaptiveEnabled = document.getElementById('adaptiveMode').checked;
         }
         
-        // Start monitoring
+        // Start monitoring with adaptive intervals
         document.getElementById('startMonitoring').onclick = () => {
             monitoringActive = true;
             startTime = Date.now();
             
-            const interval = parseInt(document.getElementById('analysisInterval').value);
-            monitoringInterval = setInterval(captureAndAnalyze, interval);
+            baseInterval = parseInt(document.getElementById('analysisInterval').value);
+            currentInterval = baseInterval;
+            
+            // Start with base interval
+            monitoringInterval = setInterval(() => {
+                captureAndAnalyze();
+                adjustAnalysisInterval();
+            }, currentInterval);
             
             document.getElementById('startMonitoring').disabled = true;
             document.getElementById('stopMonitoring').disabled = false;
             
-            addLogEntry('Monitoring started', 'info');
+            addLogEntry(`Monitoring started (adaptive intervals: ${activeInterval/1000}s-${baseInterval/1000}s)`, 'info');
             saveSettings();
             
             // Initial capture
@@ -1110,22 +1123,60 @@
         // Capture and analyze frame
         async function captureAndAnalyze() {
             try {
-                // Get snapshot from server (avoids CORS nightmare)
-                addLogEntry('Capturing frame from server...', 'info');
+                // Try to use buffered frame first for better performance
+                addLogEntry('Capturing frame for analysis...', 'info');
                 
-                const response = await fetch('http://localhost:3000/snapshot.jpg');
-                if (!response.ok) {
-                    throw new Error('Failed to capture snapshot');
+                let imageData = null;
+                
+                // Option 1: Try to use buffered frame via analyze-buffer endpoint
+                if (frameBufferMode !== 'direct') {
+                    try {
+                        const bufferResponse = await fetch('http://localhost:3000/analyze', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                useBufferedFrame: true,
+                                prompt: 'Capture frame',
+                                model: document.getElementById('modelSelect').value
+                            })
+                        });
+                        
+                        if (bufferResponse.ok) {
+                            // Frame captured from buffer, now get it for analysis
+                            const response = await fetch('http://localhost:3000/snapshot.jpg');
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                const reader = new FileReader();
+                                imageData = await new Promise((resolve, reject) => {
+                                    reader.onloadend = () => resolve(reader.result);
+                                    reader.onerror = reject;
+                                    reader.readAsDataURL(blob);
+                                });
+                                addLogEntry('Using buffered frame', 'info');
+                            }
+                        }
+                    } catch (e) {
+                        // Fall through to direct capture
+                    }
                 }
                 
-                const blob = await response.blob();
-                const reader = new FileReader();
-                
-                const imageData = await new Promise((resolve, reject) => {
-                    reader.onloadend = () => resolve(reader.result);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(blob);
-                });
+                // Option 2: Direct snapshot capture
+                if (!imageData) {
+                    const response = await fetch('http://localhost:3000/snapshot.jpg');
+                    if (!response.ok) {
+                        throw new Error('Failed to capture snapshot');
+                    }
+                    
+                    const blob = await response.blob();
+                    const reader = new FileReader();
+                    
+                    imageData = await new Promise((resolve, reject) => {
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+                    addLogEntry('Using direct snapshot', 'info');
+                }
                 
                 // Get active conditions
                 const conditions = getActiveConditions();
@@ -1215,11 +1266,17 @@
             }
         }
         
-        // Process analysis result
+        // Process analysis result with motion detection
         function processAnalysisResult(result, conditions) {
             const lines = result.split('\n');
             let hasAlert = false;
+            let hasMotion = false;
             let summary = [];
+            
+            // Check for motion or activity indicators
+            const motionKeywords = ['moving', 'robot', 'ball', 'person', 'human', 'change', 'detected', 'yes'];
+            const lowerResult = result.toLowerCase();
+            hasMotion = motionKeywords.some(keyword => lowerResult.includes(keyword));
             
             conditions.forEach((condition, index) => {
                 const line = lines.find(l => l.includes(`${index + 1}.`)) || '';
@@ -1229,8 +1286,14 @@
                     hasAlert = true;
                     stats.alerts++;
                     summary.push(`⚠️ ${condition}: ${line}`);
+                    hasMotion = true; // Alerts indicate activity
                 }
             });
+            
+            // Trigger motion-based throttling
+            if (hasMotion) {
+                triggerMotionThrottle();
+            }
             
             if (hasAlert) {
                 addLogEntry(summary.join('\n'), 'alert');
@@ -1246,8 +1309,69 @@
                     fullResult: result
                 });
             } else {
-                addLogEntry(`Frame ${stats.frames}: All conditions normal`, 'success');
+                addLogEntry(`Frame ${stats.frames}: All conditions normal${hasMotion ? ' (motion detected)' : ''}`, 'success');
                 updateConnectionStatus('All systems normal', 'success');
+            }
+        }
+        
+        // Trigger faster analysis when motion detected
+        function triggerMotionThrottle() {
+            lastMotionTime = Date.now();
+            
+            // Clear existing throttle timeout
+            if (motionThrottleTimeout) {
+                clearTimeout(motionThrottleTimeout);
+            }
+            
+            // Switch to fast interval if not already
+            if (currentInterval !== activeInterval && monitoringActive) {
+                currentInterval = activeInterval;
+                
+                // Restart interval with faster rate
+                if (monitoringInterval) {
+                    clearInterval(monitoringInterval);
+                    monitoringInterval = setInterval(() => {
+                        captureAndAnalyze();
+                        adjustAnalysisInterval();
+                    }, currentInterval);
+                }
+                
+                addLogEntry(`Motion detected - increased analysis rate to ${activeInterval/1000}s`, 'info');
+            }
+            
+            // Set timeout to return to normal interval
+            motionThrottleTimeout = setTimeout(() => {
+                if (monitoringActive) {
+                    currentInterval = baseInterval;
+                    
+                    // Restart interval with normal rate
+                    if (monitoringInterval) {
+                        clearInterval(monitoringInterval);
+                        monitoringInterval = setInterval(() => {
+                            captureAndAnalyze();
+                            adjustAnalysisInterval();
+                        }, currentInterval);
+                    }
+                    
+                    addLogEntry(`No recent motion - reduced analysis rate to ${baseInterval/1000}s`, 'info');
+                }
+            }, 30000); // Return to normal after 30 seconds of no motion
+        }
+        
+        // Adjust analysis interval based on conditions
+        function adjustAnalysisInterval() {
+            if (!monitoringActive) return;
+            
+            const timeSinceMotion = lastMotionTime ? Date.now() - lastMotionTime : Infinity;
+            
+            // Adaptive logic
+            if (timeSinceMotion < 10000) { // Recent motion (< 10s)
+                if (currentInterval !== activeInterval) {
+                    triggerMotionThrottle();
+                }
+            } else if (timeSinceMotion > 60000) { // No motion for 1 minute
+                // Could implement even slower interval for quiet periods
+                // For now, just use base interval
             }
         }
         

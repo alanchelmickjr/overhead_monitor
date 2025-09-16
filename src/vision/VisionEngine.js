@@ -18,7 +18,8 @@ class VisionEngine extends EventEmitter {
   constructor(config = {}) {
     super();
     this.baseUrl = config.base_url || config.baseUrl || 'http://localhost:8080';
-    this.apiPath = config.api_path || '/v1/chat/completions';
+    // Use /completion for llama.cpp, /v1/chat/completions for OpenAI-compatible
+    this.apiPath = config.api_path || '/completion';
     this.timeout = config.timeout || 30000;
     this.maxRetries = config.max_retries || 3;
     this.retryDelay = config.retry_delay || 1000;

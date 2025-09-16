@@ -124,8 +124,9 @@ start_ngrok() {
     pkill -f "ngrok start" || true
     sleep 1
     
-    # Start ngrok with all tunnels
-    ngrok start --all --config ngrok.yml &
+    # Start ngrok with custom domain for Pay-as-you-go plan
+    # Only start the robot-monitor tunnel with the custom domain
+    ngrok http 4040 --domain=lekiwi.ngrok.io &
     NGROK_PID=$!
     
     # Wait for ngrok to start
@@ -458,8 +459,11 @@ while true; do
     fi
     
     # Check ngrok status if enabled
-    if [[ "$SKIP_NGROK" != "true" ]] && ! pgrep -f "ngrok start" > /dev/null; then
-        echo -e "${YELLOW}⚠️  ngrok stopped. Restarting...${NC}"
+    if [[ "$SKIP_NGROK" != "true" ]] && ! pgrep -f "ngrok http" > /dev/null; then
+        echo -e "${YELLOW}⚠️  ngrok stopped. Killing any stale processes and restarting...${NC}"
+        # Kill any existing ngrok processes first to avoid conflicts
+        pkill -f "ngrok" 2>/dev/null || true
+        sleep 2
         start_ngrok
     fi
 done
