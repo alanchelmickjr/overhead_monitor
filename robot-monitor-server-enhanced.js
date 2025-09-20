@@ -35,8 +35,8 @@ const frameBufferManager = new FrameBufferManager({
 
 // Initialize Vision Engine and Model Selector
 const visionEngine = new VisionEngine({
-    base_url: process.env.SMOLVLM_API_URL || 'http://localhost:8080',
-    api_path: '/completion'
+    base_url: process.env.SMOLVLM_API_URL || 'http://localhost:8080'
+    // Uses default /v1/chat/completions from VisionEngine
 });
 
 const modelSelector = new ModelSelector(visionEngine);
@@ -279,9 +279,11 @@ app.post('/analyze', async (req, res) => {
         
         log(`Analyzing image with model: ${model || 'default'}`, 'INFO');
         
-        // Override API URL if provided
+        // Override API URL if provided (strip any /v1/... path if included)
         if (apiUrl && apiUrl !== visionEngine.baseUrl) {
-            visionEngine.baseUrl = apiUrl;
+            // Remove /v1/chat/completions if it's in the URL
+            const cleanUrl = apiUrl.replace(/\/v1\/chat\/completions$/, '');
+            visionEngine.baseUrl = cleanUrl;
         }
         
         // Create frame data
@@ -294,16 +296,15 @@ app.post('/analyze', async (req, res) => {
         // Analyze with specified model
         let analysis;
         try {
-            log(`Sending vision request to ${visionEngine.baseUrl}${visionEngine.apiPath}`, 'DEBUG');
-            // Don't log the full base64 image data, just the size
-            const imageSize = frameData.image ? frameData.image.split(',')[0].length : 0;
-            log(`Image data size: ~${Math.round(imageSize / 1024)}KB`, 'DEBUG');
+            log(`Sending vision request to ${visionEngine.baseUrl}`, 'DEBUG');
+            // Don't log the image data
             analysis = await visionEngine.analyzeFrame(frameData, prompt, { model });
         } catch (error) {
             log(`Vision API error: ${error.message}`, 'ERROR');
             if (error.response) {
                 log(`Response status: ${error.response.status}`, 'ERROR');
-                log(`Response data: ${JSON.stringify(error.response.data)}`, 'ERROR');
+                // Don't log response data as it might contain base64
+                log(`Response error: ${error.response.data?.error || 'Unknown error'}`, 'ERROR');
             }
             throw error;
         }

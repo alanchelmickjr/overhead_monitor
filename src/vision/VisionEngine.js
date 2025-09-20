@@ -18,8 +18,8 @@ class VisionEngine extends EventEmitter {
   constructor(config = {}) {
     super();
     this.baseUrl = config.base_url || config.baseUrl || 'http://localhost:8080';
-    // Use /completion for llama.cpp, /v1/chat/completions for OpenAI-compatible
-    this.apiPath = config.api_path || '/completion';
+    // The llama.cpp server is running with OpenAI-compatible API
+    this.apiPath = config.api_path || '/v1/chat/completions';
     this.timeout = config.timeout || 30000;
     this.maxRetries = config.max_retries || 3;
     this.retryDelay = config.retry_delay || 1000;
@@ -407,50 +407,34 @@ class VisionEngine extends EventEmitter {
       const maxTokens = modelConfig?.parameters?.max_tokens || this.maxTokens;
       const temperature = modelConfig?.parameters?.temperature || this.temperature;
       
-      // For llama.cpp, use the correct format
-      const isLlamaCpp = this.apiPath === '/completion';
-      
-      let requestBody;
-      if (isLlamaCpp) {
-        // Extract base64 data without the data URL prefix
-        const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
-        
-        requestBody = {
-          prompt: prompt,
-          image_data: [{
-            data: base64Data,
-            id: 1
-          }],
-          n_predict: maxTokens,
-          temperature: temperature,
-          cache_prompt: true,
-          slot_id: -1
-        };
-      } else {
-        // OpenAI format
-        requestBody = {
-          model: modelName,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: prompt
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: imageBase64
-                  }
+      // llama.cpp supports standard OpenAI format with image_url
+      // The working example shows it uses the same format
+      const requestBody = {
+        model: modelName,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: prompt
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: imageBase64  // Full data URI: data:image/jpeg;base64,...
                 }
-              ]
-            }
-          ],
-          max_tokens: maxTokens,
-          temperature: temperature
-        };
-      }
+              }
+            ]
+          }
+        ],
+        max_tokens: maxTokens,
+        temperature: temperature
+      };
+      
+      // Log request info without base64 data
+      logger.info(`[VISION] Sending request to ${this.baseUrl}${this.apiPath}`);
+      logger.debug(`[VISION] Model: ${modelName}, Max tokens: ${maxTokens}, Temp: ${temperature}`);
       
       const startTime = Date.now();
       
