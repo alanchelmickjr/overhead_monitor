@@ -41,8 +41,16 @@ const visionEngine = new VisionEngine({
 
 const modelSelector = new ModelSelector(visionEngine);
 
+// Check if debug mode is enabled
+const DEBUG_MODE = process.env.DEBUG === 'true';
+
 // Logging
 function log(message, level = 'INFO') {
+    // Skip DEBUG level logs if not in debug mode
+    if (level === 'DEBUG' && !DEBUG_MODE) {
+        return;
+    }
+    
     const timestamp = new Date().toISOString();
     const color = {
         'ERROR': '\x1b[31m',
@@ -192,7 +200,7 @@ app.post('/models/benchmark', async (req, res) => {
             const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
             if (latestFrame && latestFrame.data) {
                 testFrame = `data:image/jpeg;base64,${latestFrame.data.toString('base64')}`;
-                log(`Using latest buffered frame for benchmark (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'INFO');
+                log(`Using latest buffered frame for benchmark (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'DEBUG');
             } else {
                 return res.status(400).json({ error: 'No test frame provided and no buffered frames available' });
             }
@@ -231,7 +239,7 @@ app.post('/models/compare', async (req, res) => {
             const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
             if (latestFrame && latestFrame.data) {
                 testFrame = `data:image/jpeg;base64,${latestFrame.data.toString('base64')}`;
-                log(`Using latest buffered frame for comparison (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'INFO');
+                log(`Using latest buffered frame for comparison (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'DEBUG');
             } else {
                 return res.status(400).json({ error: 'No test frame provided and no buffered frames available' });
             }
@@ -257,27 +265,50 @@ app.post('/models/compare', async (req, res) => {
     }
 });
 
-// Vision Analysis Endpoint - Enhanced with frame buffering
+// Helper function to generate thumbnail from base64 image
+function generateThumbnail(base64Image, maxWidth = 200, maxHeight = 150) {
+    try {
+        // Extract just the base64 data if it includes the data URL prefix
+        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+        
+        // For now, return the same image as thumbnail (browser will resize via CSS)
+        // In production, you'd use sharp or jimp to actually resize
+        return `data:image/jpeg;base64,${base64Data}`;
+    } catch (error) {
+        log(`Error generating thumbnail: ${error.message}`, 'ERROR');
+        return null;
+    }
+}
+
+// Vision Analysis Endpoint - Enhanced with frame buffering and thumbnails
 app.post('/analyze', async (req, res) => {
     try {
         let { image, prompt, apiUrl, model, useBufferedFrame } = req.body;
+        let frameId = null;
+        let frameTimestamp = null;
         
-        // Option to use latest buffered frame instead of provided image
-        if (useBufferedFrame && !image) {
+        // ONLY use buffered frame if explicitly requested AND no image provided
+        // Otherwise ALWAYS use the provided image
+        if (useBufferedFrame === true && !image) {
             const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
             if (latestFrame && latestFrame.data) {
                 image = `data:image/jpeg;base64,${latestFrame.data.toString('base64')}`;
-                log(`Using latest buffered frame for analysis (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'INFO');
+                frameId = latestFrame.id;
+                frameTimestamp = latestFrame.timestamp;
+                log(`Using latest buffered frame ${frameId} for analysis (size: ${Math.round(latestFrame.data.length / 1024)}KB)`, 'DEBUG');
             } else {
                 return res.status(400).json({ error: 'No buffered frames available' });
             }
         }
         
+        // Log what we're actually analyzing
+        log(`Analyzing ${image ? 'provided image' : 'no image!'} with useBufferedFrame=${useBufferedFrame}`, 'DEBUG');
+        
         if (!image || !prompt) {
             return res.status(400).json({ error: 'Image and prompt required' });
         }
         
-        log(`Analyzing image with model: ${model || 'default'}`, 'INFO');
+        log(`Analyzing image with model: ${model || 'default'}`, 'DEBUG');
         
         // Override API URL if provided (strip any /v1/... path if included)
         if (apiUrl && apiUrl !== visionEngine.baseUrl) {
@@ -288,9 +319,10 @@ app.post('/analyze', async (req, res) => {
         
         // Create frame data
         const frameData = {
-            timestamp: new Date().toISOString(),
+            timestamp: frameTimestamp || new Date().toISOString(),
             cameraId: 'manual',
-            image: image
+            image: image,
+            id: frameId || `manual-${Date.now()}`
         };
         
         // Analyze with specified model
@@ -309,7 +341,10 @@ app.post('/analyze', async (req, res) => {
             throw error;
         }
         
-        // Format response to match expected structure
+        // Generate thumbnail for the analyzed frame
+        const thumbnail = generateThumbnail(image);
+        
+        // Format response to match expected structure with frame preview
         const response = {
             choices: [{
                 message: {
@@ -319,7 +354,11 @@ app.post('/analyze', async (req, res) => {
             model: analysis.modelId,
             usage: {
                 processing_time: analysis.processingTime
-            }
+            },
+            // Add frame metadata for debugging
+            framePreview: thumbnail,
+            frameId: frameData.id,
+            frameTimestamp: frameData.timestamp
         };
         
         res.json(response);
@@ -383,7 +422,7 @@ app.post('/analyze-buffer', async (req, res) => {
 // MJPEG streaming endpoint - Enhanced with frame capture
 app.get('/stream.mjpeg', async (req, res) => {
     const clientId = `client-${req.ip}-${Date.now()}`;
-    log(`📹 Enhanced MJPEG stream requested by ${clientId}`, 'INFO');
+    log(`📹 Enhanced MJPEG stream requested by ${clientId}`, 'DEBUG');
     
     res.writeHead(200, {
         'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
@@ -467,27 +506,34 @@ app.get('/stream.mjpeg', async (req, res) => {
 
 // Snapshot endpoint - Enhanced with metadata
 app.get('/snapshot.jpg', async (req, res) => {
-    log('📸 Snapshot requested', 'INFO');
+    // Check if fresh capture is explicitly requested
+    const forceFresh = req.query.fresh === 'true';
+    log(`📸 Snapshot requested (fresh=${forceFresh})`, 'DEBUG');
     
-    // Try to get latest frame from buffer
-    const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
+    // Only use buffered frame if NOT forcing fresh AND buffer has frames
+    if (!forceFresh) {
+        const latestFrame = frameBufferManager.getLatestFrame(CAMERA_ID);
+        
+        if (latestFrame && latestFrame.data) {
+            // Use buffered frame
+            res.writeHead(200, {
+                'Content-Type': 'image/jpeg',
+                'Content-Length': latestFrame.data.length,
+                'Cache-Control': 'no-cache',
+                'X-Frame-ID': latestFrame.id,
+                'X-Frame-Timestamp': latestFrame.timestamp,
+                'X-Frame-Sequence': latestFrame.sequenceNumber,
+                'X-Frame-Source': 'buffer',
+                'X-Frame-Metadata': JSON.stringify(latestFrame.metadata)
+            });
+            res.end(latestFrame.data);
+            log('✅ Snapshot delivered from buffer', 'SUCCESS');
+            return;
+        }
+    }
     
-    if (latestFrame && latestFrame.data) {
-        // Use buffered frame
-        res.writeHead(200, {
-            'Content-Type': 'image/jpeg',
-            'Content-Length': latestFrame.data.length,
-            'Cache-Control': 'no-cache',
-            'X-Frame-ID': latestFrame.id,
-            'X-Frame-Timestamp': latestFrame.timestamp,
-            'X-Frame-Sequence': latestFrame.sequenceNumber,
-            'X-Frame-Metadata': JSON.stringify(latestFrame.metadata)
-        });
-        res.end(latestFrame.data);
-        log('✅ Snapshot delivered from buffer', 'SUCCESS');
-    } else {
-        // No buffered frames, capture fresh one
-        log('No buffered frames, capturing fresh snapshot', 'INFO');
+    // Capture fresh frame (either forced or no buffer available)
+    log(`${forceFresh ? 'Forced fresh capture' : 'No buffered frames'}, capturing fresh snapshot`, 'DEBUG');
         
         const { spawn } = require('child_process');
         const ffmpeg = spawn('ffmpeg', [
@@ -510,7 +556,10 @@ app.get('/snapshot.jpg', async (req, res) => {
                 res.writeHead(200, {
                     'Content-Type': 'image/jpeg',
                     'Content-Length': imageData.length,
-                    'Cache-Control': 'no-cache'
+                    'Cache-Control': 'no-cache',
+                    'X-Frame-ID': `fresh-${Date.now()}`,
+                    'X-Frame-Timestamp': new Date().toISOString(),
+                    'X-Frame-Source': 'fresh'
                 });
                 res.end(imageData);
                 log('✅ Fresh snapshot delivered successfully', 'SUCCESS');
@@ -523,7 +572,6 @@ app.get('/snapshot.jpg', async (req, res) => {
         setTimeout(() => {
             ffmpeg.kill();
         }, 5000);
-    }
 });
 
 // Frame history endpoint
@@ -649,7 +697,7 @@ frameCaptureService.on('capture-ended', async (event) => {
     
     // Try to restart if clients are still connected
     if (activeClients.size > 0 && event.code !== 0) {
-        log('Attempting to restart capture for connected clients...', 'INFO');
+        log('Attempting to restart capture for connected clients...', 'DEBUG');
         setTimeout(() => {
             startFrameCapture().catch(err => {
                 log(`Failed to restart capture: ${err.message}`, 'ERROR');

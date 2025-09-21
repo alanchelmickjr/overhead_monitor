@@ -12,6 +12,45 @@
 
 set -e  # Exit on error
 
+# Parse command line arguments
+DEBUG_MODE=false
+SHOW_HELP=false
+
+for arg in "$@"; do
+    case $arg in
+        -d|--debug)
+            DEBUG_MODE=true
+            shift
+            ;;
+        -h|--help)
+            SHOW_HELP=true
+            shift
+            ;;
+        *)
+            ;;
+    esac
+done
+
+# Show help if requested
+if [ "$SHOW_HELP" = true ]; then
+    echo "LeKiwi Pen Nanny Cam - Startup Script"
+    echo ""
+    echo "Usage: ./start-all.sh [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  -d, --debug    Enable debug output (verbose logging)"
+    echo "  -h, --help     Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  ./start-all.sh          # Start in quiet mode (default)"
+    echo "  ./start-all.sh --debug  # Start with debug output enabled"
+    echo ""
+    exit 0
+fi
+
+# Export DEBUG environment variable for Node.js processes
+export DEBUG=$DEBUG_MODE
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,6 +61,9 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}🦜 Starting LeKiwi Pen Nanny Cam System...${NC}"
+if [ "$DEBUG_MODE" = true ]; then
+    echo -e "${YELLOW}🔍 Debug mode enabled${NC}"
+fi
 echo "========================================"
 
 # Logging functions
@@ -41,6 +83,12 @@ log_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+log_debug() {
+    if [ "$DEBUG_MODE" = true ]; then
+        echo -e "${CYAN}[DEBUG]${NC} $1"
+    fi
+}
+
 # System detection
 detect_system() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -55,7 +103,7 @@ detect_system() {
 
 # Check and install ngrok
 check_ngrok() {
-    log_info "Checking ngrok installation..."
+    log_debug "Checking ngrok installation..."
     
     if ! command -v ngrok &> /dev/null; then
         log_warning "ngrok not found. Installing..."
@@ -118,7 +166,7 @@ start_ngrok() {
         return 0
     fi
     
-    log_info "Starting ngrok tunnels..."
+    log_debug "Starting ngrok tunnels..."
     
     # Kill any existing ngrok processes
     pkill -f "ngrok start" || true
@@ -169,16 +217,16 @@ install_llama_cpp() {
         return 0
     fi
     
-    log_info "llama.cpp not found, installing..."
+    log_debug "llama.cpp not found, installing..."
     
     if [[ "$SYSTEM" == "macos" ]]; then
         # Install via Homebrew on macOS
         if ! command -v brew &> /dev/null; then
-            log_info "Installing Homebrew..."
+            log_debug "Installing Homebrew..."
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         fi
         
-        log_info "Installing llama.cpp via Homebrew (optimized for M4)..."
+        log_debug "Installing llama.cpp via Homebrew (optimized for M4)..."
         # Install with Metal acceleration for M4
         brew install llama.cpp
         
@@ -192,7 +240,7 @@ install_llama_cpp() {
         fi
     else
         # Build from source on Linux
-        log_info "Building llama.cpp from source..."
+        log_debug "Building llama.cpp from source..."
         
         # Install dependencies
         if command -v apt-get &> /dev/null; then
@@ -246,7 +294,7 @@ download_models() {
         MMPROJ_PATH="$LOCAL_MMPROJ"
         log_success "Models found locally"
     else
-        log_info "Downloading LLaVA 1.5 models (more stable than SmolVLM)..."
+        log_debug "Downloading LLaVA 1.5 models (more stable than SmolVLM)..."
         
         # Install wget if missing on macOS
         if [[ "$SYSTEM" == "macos" ]] && ! command -v wget &> /dev/null; then
@@ -266,7 +314,7 @@ download_models() {
 # Install Node.js dependencies
 install_node_deps() {
     if [ -f "package.json" ] && [ ! -d "node_modules" ]; then
-        log_info "Installing Node.js dependencies..."
+        log_debug "Installing Node.js dependencies..."
         npm install
         log_success "Node.js dependencies installed"
     fi
@@ -306,7 +354,7 @@ wait_for_service() {
 }
 
 # AUTO-SETUP: Install everything if missing
-log_info "Checking and installing dependencies..."
+log_debug "Checking and installing dependencies..."
 detect_system
 check_ngrok
 install_llama_cpp
@@ -323,9 +371,11 @@ sleep 2
 
 # Start llama.cpp server directly
 echo -e "${BLUE}🤖 Starting llama.cpp server...${NC}"
-echo -e "${GREEN}Using llama-server: $LLAMA_SERVER_PATH${NC}"
-echo -e "${GREEN}Using model: $MODEL_PATH${NC}"
-echo -e "${GREEN}Using mmproj: $MMPROJ_PATH${NC}"
+if [ "$DEBUG_MODE" = true ]; then
+    echo -e "${GREEN}Using llama-server: $LLAMA_SERVER_PATH${NC}"
+    echo -e "${GREEN}Using model: $MODEL_PATH${NC}"
+    echo -e "${GREEN}Using mmproj: $MMPROJ_PATH${NC}"
+fi
 
 # Check if port 8080 is already in use
 if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -335,17 +385,24 @@ if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
 fi
 
 # Start llama.cpp server with LLaVA-optimized parameters
-"$LLAMA_SERVER_PATH" \
-    --model "$MODEL_PATH" \
-    --mmproj "$MMPROJ_PATH" \
-    --host 0.0.0.0 \
-    --port 8080 \
-    --ctx-size 4096 \
-    --threads 4 \
-    --gpu-layers 32 \
-    --batch-size 512 \
-    --ubatch-size 512 \
-    --verbose &
+# Only add --verbose flag if in debug mode
+LLAMA_ARGS=(
+    --model "$MODEL_PATH"
+    --mmproj "$MMPROJ_PATH"
+    --host 0.0.0.0
+    --port 8080
+    --ctx-size 4096
+    --threads 4
+    --gpu-layers 32
+    --batch-size 512
+    --ubatch-size 512
+)
+
+if [ "$DEBUG_MODE" = true ]; then
+    LLAMA_ARGS+=(--verbose)
+fi
+
+"$LLAMA_SERVER_PATH" "${LLAMA_ARGS[@]}" &
 
 LLAMA_PID=$!
 echo "llama-server started with PID: $LLAMA_PID"
@@ -365,8 +422,8 @@ echo -e "${BLUE}📹 Starting camera monitoring services...${NC}"
 # Start ONLY the enhanced robot monitor on port 3000 (internal control server)
 # This includes ALL camera, RTSP proxy, and AI vision features
 if [ -f "robot-monitor-server-enhanced.js" ]; then
-    log_info "Starting enhanced robot monitor on port 3000 (internal control)..."
-    PORT=3000 node robot-monitor-server-enhanced.js &
+    log_debug "Starting enhanced robot monitor on port 3000 (internal control)..."
+    PORT=3000 DEBUG=$DEBUG_MODE node robot-monitor-server-enhanced.js &
     ROBOT_PID=$!
 else
     log_error "robot-monitor-server-enhanced.js not found!"
@@ -375,8 +432,8 @@ fi
 
 # Start public monitor server
 if [ -f "robot-monitor-public-server.js" ]; then
-    log_info "Starting public monitor server on port 4040..."
-    node robot-monitor-public-server.js &
+    log_debug "Starting public monitor server on port 4040..."
+    DEBUG=$DEBUG_MODE node robot-monitor-public-server.js &
     PUBLIC_PID=$!
 fi
 

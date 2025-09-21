@@ -318,7 +318,7 @@
         .events-container {
             padding: 15px;
             background: rgba(10,10,10,0.7);
-            max-height: 150px;
+            max-height: 180px; /* Show 3-4 events max */
             overflow-y: auto;
             border-bottom: 2px solid #8b6914;
             position: relative;
@@ -915,10 +915,9 @@
             
             eventsContainer.insertBefore(eventDiv, eventsContainer.firstChild);
             
-            // Keep only last 10 events
-            while (eventsContainer.children.length > 10) {
-                eventsContainer.removeChild(eventsContainer.lastChild);
-            }
+            // Don't limit events - let them all scroll
+            // Auto-scroll to top to show newest event
+            eventsContainer.scrollTop = 0;
         }
         
         // Update connection status

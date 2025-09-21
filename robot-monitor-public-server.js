@@ -27,8 +27,16 @@ let clientIdCounter = 0;
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 const HEARTBEAT_TIMEOUT = 60000;  // 60 seconds timeout
 
+// Check if debug mode is enabled
+const DEBUG_MODE = process.env.DEBUG === 'true';
+
 // Simple logging
 function log(message, level = 'INFO') {
+    // Skip DEBUG level logs if not in debug mode
+    if (level === 'DEBUG' && !DEBUG_MODE) {
+        return;
+    }
+    
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] [${level}] ${message}`);
 }
@@ -40,7 +48,7 @@ app.get('/', (req, res) => {
 
 // Proxy the video stream from main server
 app.get('/stream.mjpeg', (req, res) => {
-    log('Proxying video stream request');
+    log('Proxying video stream request', 'DEBUG');
     
     // Proxy the stream from stream server (port 3000)
     fetch(`${STREAM_SERVER}/stream.mjpeg`)
@@ -80,21 +88,59 @@ app.get('/snapshot.jpg', async (req, res) => {
     }
 });
 
+// Store recent events
+let recentEvents = [];
+const MAX_EVENTS = 50;
+
 // Get events from main server (read-only)
 app.get('/events', async (req, res) => {
     try {
-        // In a real implementation, this would fetch recent events from the main server
-        // For now, return a mock response
         res.json({
-            events: [
-                {
-                    timestamp: new Date().toISOString(),
-                    type: 'robot_status',
-                    message: 'All robots operational'
-                }
-            ]
+            events: recentEvents
         });
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Endpoint to receive events from internal monitor
+app.post('/events', cors(), express.json(), (req, res) => {
+    try {
+        const { type, message, conditions, timestamp } = req.body;
+        
+        const event = {
+            timestamp: timestamp || new Date().toISOString(),
+            type: type || 'detection',
+            message: message || 'Detection event',
+            conditions: conditions || []
+        };
+        
+        // Store event
+        recentEvents.unshift(event);
+        if (recentEvents.length > MAX_EVENTS) {
+            recentEvents = recentEvents.slice(0, MAX_EVENTS);
+        }
+        
+        // Broadcast to all connected WebSocket clients
+        const eventMessage = JSON.stringify({
+            type: 'event',
+            event: event
+        });
+        
+        chatClients.forEach((client) => {
+            if (client.ws.readyState === WebSocket.OPEN) {
+                try {
+                    client.ws.send(eventMessage);
+                } catch (error) {
+                    log(`Failed to send event to client #${client.id}: ${error.message}`, 'ERROR');
+                }
+            }
+        });
+        
+        log(`Event broadcasted: ${message}`, 'INFO');
+        res.json({ success: true });
+    } catch (error) {
+        log(`Error processing event: ${error.message}`, 'ERROR');
         res.status(500).json({ error: error.message });
     }
 });
@@ -131,7 +177,7 @@ wss.on('connection', (ws, req) => {
                     timestamp: new Date().toISOString(),
                     clientId: clientId
                 }));
-                log(`Welcome message sent to client #${clientId}`);
+                log(`Welcome message sent to client #${clientId}`, 'DEBUG');
             } else {
                 log(`Client #${clientId} not ready for welcome message`, 'WARNING');
             }
@@ -175,7 +221,7 @@ wss.on('connection', (ws, req) => {
                     }
                 });
                 
-                log(`Chat message from #${clientId}: "${message.message}" (sent to ${sentCount} clients)`);
+                log(`Chat message from #${clientId}: "${message.message}" (sent to ${sentCount} clients)`, 'DEBUG');
             } else if (message.type === 'ping') {
                 // Handle client ping
                 ws.send(JSON.stringify({ type: 'pong' }));
@@ -235,7 +281,7 @@ server.listen(PORT, () => {
     console.log('\n✅ Public server ready!\n');
     
     // Chat runs standalone on port 4040 - no connection to internal server needed
-    log('Chat system ready on port 4040 - standalone operation');
+    log('Chat system ready on port 4040 - standalone operation', 'DEBUG');
 });
 
 // Graceful shutdown

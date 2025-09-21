@@ -240,6 +240,29 @@
             background: #441111;
             border-left: 4px solid #ff4444;
             border-radius: 4px;
+            display: flex;
+            gap: 15px;
+        }
+        
+        .detection-thumbnail {
+            width: 120px;
+            height: 90px;
+            border-radius: 4px;
+            border: 2px solid #ff4444;
+            object-fit: cover;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .detection-thumbnail:hover {
+            transform: scale(1.5);
+            z-index: 1000;
+            position: relative;
+            box-shadow: 0 0 20px rgba(255, 68, 68, 0.5);
+        }
+        
+        .detection-content {
+            flex: 1;
         }
         
         .detection-time {
@@ -250,6 +273,12 @@
         .detection-condition {
             margin-top: 5px;
             color: #fff;
+        }
+        
+        .detection-frame-info {
+            font-size: 10px;
+            color: #888;
+            margin-top: 5px;
         }
         
         .log-entry {
@@ -1120,63 +1149,50 @@
             updateStats();
         };
         
+        // Store latest analysis results with thumbnails
+        let latestAnalysisResults = new Map();
+        
         // Capture and analyze frame
         async function captureAndAnalyze() {
             try {
-                // Try to use buffered frame first for better performance
                 addLogEntry('Capturing frame for analysis...', 'info');
                 
                 let imageData = null;
+                let frameId = null;
+                let frameTimestamp = null;
                 
-                // Option 1: Try to use buffered frame via analyze-buffer endpoint
-                if (frameBufferMode !== 'direct') {
-                    try {
-                        const bufferResponse = await fetch('http://localhost:3000/analyze', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                useBufferedFrame: true,
-                                prompt: 'Capture frame',
-                                model: document.getElementById('modelSelect').value
-                            })
-                        });
-                        
-                        if (bufferResponse.ok) {
-                            // Frame captured from buffer, now get it for analysis
-                            const response = await fetch('http://localhost:3000/snapshot.jpg');
-                            if (response.ok) {
-                                const blob = await response.blob();
-                                const reader = new FileReader();
-                                imageData = await new Promise((resolve, reject) => {
-                                    reader.onloadend = () => resolve(reader.result);
-                                    reader.onerror = reject;
-                                    reader.readAsDataURL(blob);
-                                });
-                                addLogEntry('Using buffered frame', 'info');
-                            }
-                        }
-                    } catch (e) {
-                        // Fall through to direct capture
-                    }
+                // IMPORTANT: Respect the frame buffer mode setting
+                // When in 'direct' mode, force fresh capture
+                // When in 'buffered' mode, use buffered frames
+                const useFresh = frameBufferMode === 'direct';
+                const snapshotUrl = useFresh ?
+                    'http://localhost:3000/snapshot.jpg?fresh=true' :
+                    'http://localhost:3000/snapshot.jpg';
+                
+                addLogEntry(`Using ${useFresh ? 'FRESH direct' : 'buffered'} frame capture mode`, 'info');
+                
+                const response = await fetch(snapshotUrl);
+                if (!response.ok) {
+                    throw new Error('Failed to capture snapshot');
                 }
                 
-                // Option 2: Direct snapshot capture
-                if (!imageData) {
-                    const response = await fetch('http://localhost:3000/snapshot.jpg');
-                    if (!response.ok) {
-                        throw new Error('Failed to capture snapshot');
-                    }
-                    
-                    const blob = await response.blob();
-                    const reader = new FileReader();
-                    
-                    imageData = await new Promise((resolve, reject) => {
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(blob);
-                    });
-                    addLogEntry('Using direct snapshot', 'info');
-                }
+                // Get frame metadata from headers if available
+                frameId = response.headers.get('X-Frame-ID') || `snapshot-${Date.now()}`;
+                frameTimestamp = response.headers.get('X-Frame-Timestamp') || new Date().toISOString();
+                
+                const blob = await response.blob();
+                const reader = new FileReader();
+                
+                imageData = await new Promise((resolve, reject) => {
+                    reader.onloadend = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+                
+                // Store the EXACT image we're about to analyze for debugging
+                const debugImage = imageData;
+                
+                addLogEntry(`Using frame ${frameId} captured at ${new Date(frameTimestamp).toLocaleTimeString()}`, 'info');
                 
                 // Get active conditions
                 const conditions = getActiveConditions();
@@ -1188,12 +1204,16 @@
                 // Build prompt for ball tracking
                 const prompt = buildTrackingPrompt(conditions);
                 
-                // Call SmolVLM API
-                const result = await callSmolVLM(imageData, prompt);
+                // Call SmolVLM API and get result with thumbnail
+                const result = await callSmolVLMWithThumbnail(imageData, prompt, frameId, frameTimestamp);
+                
+                // IMPORTANT: Use the EXACT image we sent for analysis as the thumbnail
+                // Not the one returned from the server (which might be different)
+                result.thumbnail = debugImage;
                 
                 // Process result
                 stats.frames++;
-                processAnalysisResult(result, conditions);
+                processAnalysisResult(result.content, conditions, result.thumbnail, result.frameInfo);
                 updateStats();
                 
             } catch (error) {
@@ -1207,7 +1227,7 @@
             }
         }
         
-        // Call SmolVLM API through proxy (avoids CORS)
+        // Call SmolVLM API through proxy (avoids CORS) - original version for chat
         async function callSmolVLM(imageData, prompt, isCustomQuery = false) {
             const modelSelect = document.getElementById('modelSelect');
             const selectedModel = modelSelect.value;
@@ -1266,8 +1286,65 @@
             }
         }
         
-        // Process analysis result with motion detection
-        function processAnalysisResult(result, conditions) {
+        // Enhanced version that returns thumbnail and frame info
+        async function callSmolVLMWithThumbnail(imageData, prompt, frameId, frameTimestamp) {
+            const modelSelect = document.getElementById('modelSelect');
+            const selectedModel = modelSelect.value;
+            let apiUrl = document.getElementById('smolvlmUrl').value;
+            
+            try {
+                // Use proxy endpoint to avoid CORS issues
+                // IMPORTANT: Send the EXACT image we captured, don't use buffered frame
+                const response = await fetch('http://localhost:3000/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: imageData,  // Send the exact captured image
+                        prompt: prompt,
+                        apiUrl: apiUrl,
+                        model: selectedModel,
+                        useBufferedFrame: false  // CRITICAL: Don't use a different buffered frame!
+                    })
+                });
+                
+                if (!response.ok) {
+                    let errorMsg = `API error: ${response.status}`;
+                    try {
+                        const error = await response.json();
+                        errorMsg = error.details || error.error || errorMsg;
+                    } catch (e) {
+                        // If response isn't JSON, just use status
+                    }
+                    throw new Error(errorMsg);
+                }
+                
+                const data = await response.json();
+                if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+                    throw new Error(`Invalid response format from ${selectedModel === 'llava' ? 'Llava' : 'SmolVLM'}`);
+                }
+                
+                // Return the full response including thumbnail
+                // CRITICAL: Always use the imageData we sent, not what the server returns
+                return {
+                    content: data.choices[0].message.content,
+                    thumbnail: imageData, // Always use the EXACT image we sent for analysis
+                    frameInfo: {
+                        id: data.frameId || frameId,
+                        timestamp: data.frameTimestamp || frameTimestamp,
+                        model: data.model || selectedModel
+                    }
+                };
+            } catch (error) {
+                // Re-throw with more context
+                const modelName = selectedModel === 'llava' ? 'Llava' : 'SmolVLM';
+                throw new Error(`${modelName} API Error: ${error.message}`);
+            }
+        }
+        
+        // Process analysis result with motion detection and thumbnails
+        function processAnalysisResult(result, conditions, thumbnail, frameInfo) {
             const lines = result.split('\n');
             let hasAlert = false;
             let hasMotion = false;
@@ -1299,14 +1376,16 @@
                 addLogEntry(summary.join('\n'), 'alert');
                 updateConnectionStatus('Alert detected!', 'warning');
                 
-                // Add to detection panel
-                addDetection(summary);
+                // Add to detection panel with thumbnail
+                addDetectionWithThumbnail(summary, thumbnail, frameInfo);
                 
                 // Save alert to localStorage for redundancy
                 saveAlert({
                     timestamp: new Date().toISOString(),
                     conditions: summary,
-                    fullResult: result
+                    fullResult: result,
+                    thumbnail: thumbnail,
+                    frameInfo: frameInfo
                 });
             } else {
                 addLogEntry(`Frame ${stats.frames}: All conditions normal${hasMotion ? ' (motion detected)' : ''}`, 'success');
@@ -1387,18 +1466,101 @@
             const entry = document.createElement('div');
             entry.className = 'detection-entry';
             
+            const content = document.createElement('div');
+            content.className = 'detection-content';
+            
             const time = document.createElement('div');
             time.className = 'detection-time';
             time.textContent = new Date().toLocaleTimeString();
-            entry.appendChild(time);
+            content.appendChild(time);
             
             conditions.forEach(condition => {
                 const condDiv = document.createElement('div');
                 condDiv.className = 'detection-condition';
                 condDiv.textContent = condition;
-                entry.appendChild(condDiv);
+                content.appendChild(condDiv);
             });
             
+            entry.appendChild(content);
+            detectionList.insertBefore(entry, detectionList.firstChild);
+            
+            // Keep only last 50 detections
+            while (detectionList.children.length > 50) {
+                detectionList.removeChild(detectionList.lastChild);
+            }
+        }
+        
+        // Add detection with thumbnail
+        function addDetectionWithThumbnail(conditions, thumbnail, frameInfo) {
+            const detectionList = document.getElementById('detectionList');
+            
+            // Clear placeholder if this is first detection
+            if (detectionList.querySelector('div[style*="color: #666"]')) {
+                detectionList.innerHTML = '';
+            }
+            
+            // Send event to public server (port 4040)
+            sendEventToPublicServer(conditions, thumbnail, frameInfo);
+            
+            const entry = document.createElement('div');
+            entry.className = 'detection-entry';
+            
+            // Add thumbnail if available
+            if (thumbnail) {
+                const img = document.createElement('img');
+                img.className = 'detection-thumbnail';
+                img.src = thumbnail;
+                img.alt = 'Detection frame';
+                img.title = `Frame ${frameInfo?.id || 'unknown'} - Click to enlarge`;
+                
+                // Click to show full size in new window
+                img.onclick = () => {
+                    const win = window.open('', '_blank', 'width=800,height=600');
+                    win.document.write(`
+                        <html>
+                        <head>
+                            <title>Detection Frame ${frameInfo?.id || ''}</title>
+                            <style>body { margin: 0; background: #000; } img { width: 100%; height: auto; }</style>
+                        </head>
+                        <body>
+                            <img src="${thumbnail}" />
+                            <div style="color: white; padding: 10px;">
+                                Frame: ${frameInfo?.id || 'unknown'}<br>
+                                Time: ${frameInfo?.timestamp || new Date().toISOString()}<br>
+                                Model: ${frameInfo?.model || 'unknown'}
+                            </div>
+                        </body>
+                        </html>
+                    `);
+                };
+                
+                entry.appendChild(img);
+            }
+            
+            const content = document.createElement('div');
+            content.className = 'detection-content';
+            
+            const time = document.createElement('div');
+            time.className = 'detection-time';
+            time.textContent = new Date().toLocaleTimeString();
+            content.appendChild(time);
+            
+            conditions.forEach(condition => {
+                const condDiv = document.createElement('div');
+                condDiv.className = 'detection-condition';
+                condDiv.textContent = condition;
+                content.appendChild(condDiv);
+            });
+            
+            // Add frame info
+            if (frameInfo) {
+                const frameInfoDiv = document.createElement('div');
+                frameInfoDiv.className = 'detection-frame-info';
+                frameInfoDiv.textContent = `Frame: ${frameInfo.id} | ${new Date(frameInfo.timestamp).toLocaleTimeString()}`;
+                content.appendChild(frameInfoDiv);
+            }
+            
+            entry.appendChild(content);
             detectionList.insertBefore(entry, detectionList.firstChild);
             
             // Keep only last 50 detections
@@ -1835,17 +1997,48 @@
             addDetection([resetMessage]);
         }
         
+        // Send event to public server for display
+        function sendEventToPublicServer(conditions, thumbnail, frameInfo) {
+            try {
+                // Format message from conditions
+                const message = conditions.join(' | ');
+                
+                // Send to public server
+                fetch('http://localhost:4040/events', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        type: 'detection',
+                        message: message,
+                        conditions: conditions,
+                        timestamp: new Date().toISOString(),
+                        frameInfo: frameInfo
+                    })
+                }).then(response => {
+                    if (response.ok) {
+                        console.log('Event sent to public server');
+                    }
+                }).catch(error => {
+                    console.error('Failed to send event to public server:', error);
+                });
+            } catch (error) {
+                console.error('Error sending event to public server:', error);
+            }
+        }
+        
         // Override the original processAnalysisResult function
         const originalProcessAnalysisResult = processAnalysisResult;
-        processAnalysisResult = function(result, conditions) {
+        processAnalysisResult = function(result, conditions, thumbnail, frameInfo) {
             // First, do ball tracking processing
             const ballTrackingEnabled = conditions.some(c => c.includes('ball placement'));
             if (ballTrackingEnabled) {
                 processBallTrackingResult(result);
             }
             
-            // Then call original processing for other alerts
-            originalProcessAnalysisResult(result, conditions);
+            // Then call original processing for other alerts with thumbnail
+            originalProcessAnalysisResult(result, conditions, thumbnail, frameInfo);
         };
     </script>
 </body>
