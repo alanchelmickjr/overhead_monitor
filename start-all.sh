@@ -168,13 +168,13 @@ start_ngrok() {
     
     log_debug "Starting ngrok tunnels..."
     
-    # Kill any existing ngrok processes
-    pkill -f "ngrok start" || true
-    sleep 1
+    # Kill any existing ngrok processes to prevent domain conflicts
+    pkill -f "ngrok" || true
+    pkill -9 -f "ngrok" || true
+    sleep 3
     
-    # Start ngrok with custom domain for Pay-as-you-go plan
-    # Only start the robot-monitor tunnel with the custom domain
-    ngrok http 4040 --domain=lekiwi.ngrok.io &
+    # Start ngrok tunnels with custom domains (Pay-as-you-go plan requires registered domains)
+    ngrok start robot-monitor frontiertower --config ngrok.yml &
     NGROK_PID=$!
     
     # Wait for ngrok to start
@@ -187,18 +187,17 @@ start_ngrok() {
         if [[ "$NGROK_API_RESPONSE" != "{}" ]] && [[ "$NGROK_API_RESPONSE" != "" ]]; then
             log_success "ngrok tunnels started!"
             
-            # Parse and display tunnel URLs
+            # Parse and display tunnel URLs (only registered domains work on pay-as-you-go)
             echo -e "\n${PURPLE}🌐 Public URLs:${NC}"
             echo "$NGROK_API_RESPONSE" | grep -o '"public_url":"[^"]*' | cut -d'"' -f4 | while read -r url; do
-                if [[ "$url" == *"camera-viewer"* ]]; then
-                    echo -e "   ${CYAN}📱 Camera Viewer:${NC} $url"
-                    CAMERA_PUBLIC_URL="$url"
-                elif [[ "$url" == *"robot-monitor"* ]]; then
+                if [[ "$url" == *"lekiwi"* ]]; then
                     echo -e "   ${CYAN}🤖 Robot Monitor:${NC} $url"
                     ROBOT_PUBLIC_URL="$url"
-                elif [[ "$url" == *"llava-api"* ]]; then
-                    echo -e "   ${CYAN}🧠 LLaVA API:${NC} $url"
-                    API_PUBLIC_URL="$url"
+                elif [[ "$url" == *"frontiertower"* ]]; then
+                    echo -e "   ${CYAN}🏰 Frontier Tower:${NC} $url"
+                    FRONTIERTOWER_PUBLIC_URL="$url"
+                else
+                    echo -e "   ${CYAN}🔗 Tunnel:${NC} $url"
                 fi
             done
             echo ""
@@ -366,8 +365,11 @@ echo -e "${YELLOW}🧹 Cleaning up existing processes...${NC}"
 pkill -f "node.*robot-monitor-server-enhanced.js" || true
 pkill -f "node.*robot-monitor-public-server.js" || true
 pkill -f "llama-server" || true
+# Kill ALL ngrok processes to prevent domain conflicts
 pkill -f "ngrok" || true
-sleep 2
+pkill -9 -f "ngrok" || true
+# Wait for processes to fully terminate
+sleep 3
 
 # Start llama.cpp server directly
 echo -e "${BLUE}🤖 Starting llama.cpp server...${NC}"
@@ -463,6 +465,7 @@ echo "========================================"
 check_service 8080 "llama.cpp server"
 check_service 3000 "Enhanced Robot Monitor (internal)"
 check_service 4040 "Public monitor server (public viewer)"
+check_service 8000 "Frontier Tower server"
 if [[ "$SKIP_NGROK" != "true" ]]; then
     check_service 4040 "ngrok web interface"
 fi
@@ -475,6 +478,7 @@ echo ""
 echo -e "${GREEN}📱 Local Access Points:${NC}"
 echo "   • Internal Control (PRIVATE): http://localhost:3000"
 echo "   • Public Viewer (SHARED): http://localhost:4040"
+echo "   • Frontier Tower: http://localhost:8000"
 echo "   • LLaVA API: http://localhost:8080/v1/chat/completions"
 if [[ "$SKIP_NGROK" != "true" ]]; then
     echo "   • ngrok dashboard: http://localhost:4040"
@@ -516,7 +520,7 @@ while true; do
     fi
     
     # Check ngrok status if enabled
-    if [[ "$SKIP_NGROK" != "true" ]] && ! pgrep -f "ngrok http" > /dev/null; then
+    if [[ "$SKIP_NGROK" != "true" ]] && ! pgrep -f "ngrok start" > /dev/null; then
         echo -e "${YELLOW}⚠️  ngrok stopped. Killing any stale processes and restarting...${NC}"
         # Kill any existing ngrok processes first to avoid conflicts
         pkill -f "ngrok" 2>/dev/null || true

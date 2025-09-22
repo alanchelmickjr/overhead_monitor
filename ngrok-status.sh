@@ -50,6 +50,9 @@ if command -v jq &> /dev/null; then
             "llava-api"*)
                 echo -e "${CYAN}🧠 LLaVA API:${NC}"
                 ;;
+            "frontiertower"*)
+                echo -e "${CYAN}🏰 Frontier Tower:${NC}"
+                ;;
             *)
                 echo -e "${CYAN}🔗 $name:${NC}"
                 ;;
@@ -76,6 +79,8 @@ else
             echo -e "${CYAN}🤖 Robot Monitor:${NC} $url"
         elif echo "$RESPONSE" | grep -B5 "$url" | grep -q "llava-api"; then
             echo -e "${CYAN}🧠 LLaVA API:${NC} $url"
+        elif echo "$RESPONSE" | grep -B5 "$url" | grep -q "frontiertower"; then
+            echo -e "${CYAN}🏰 Frontier Tower:${NC} $url"
         else
             echo -e "${CYAN}🔗 Tunnel:${NC} $url"
         fi

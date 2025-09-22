@@ -7,20 +7,16 @@ console_ui: false
 log_level: info
 region: us
 
-# Tunnel configurations
+# Tunnel configurations for Pay-as-you-go plan (only registered domains)
 tunnels:
-  camera-viewer:
-    proto: http
-    addr: 3000
-    inspect: false
-    
   robot-monitor:
     proto: http
     addr: 4040
     inspect: false
     hostname: lekiwi.ngrok.io
     
-  llava-api:
+  frontiertower:
     proto: http
-    addr: 8080
+    addr: 8000
     inspect: false
+    hostname: frontiertower.ngrok.io
