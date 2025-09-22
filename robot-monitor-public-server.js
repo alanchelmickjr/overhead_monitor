@@ -23,9 +23,9 @@ app.use(express.json());
 const chatClients = new Map(); // Better tracking with Map
 let clientIdCounter = 0;
 
-// Heartbeat configuration for connection health
-const HEARTBEAT_INTERVAL = 30000; // 30 seconds
-const HEARTBEAT_TIMEOUT = 60000;  // 60 seconds timeout
+// Heartbeat configuration for connection health (increased intervals)
+const HEARTBEAT_INTERVAL = 300000; // 5 minutes instead of 30 seconds
+const HEARTBEAT_TIMEOUT = 600000;  // 10 minutes timeout instead of 60 seconds
 
 // Check if debug mode is enabled
 const DEBUG_MODE = process.env.DEBUG === 'true';

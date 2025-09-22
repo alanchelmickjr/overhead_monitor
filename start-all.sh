@@ -506,7 +506,7 @@ trap 'echo -e "\n${YELLOW}🛑 Shutting down services...${NC}"; pkill -f "llama-
 
 # Keep the script running and monitor services
 while true; do
-    sleep 10
+    sleep 300  # Check every 5 minutes instead of 10 seconds
     
     # Check if critical services are still running
     if ! lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -519,14 +519,14 @@ while true; do
         break
     fi
     
-    # Check ngrok status if enabled
-    if [[ "$SKIP_NGROK" != "true" ]] && ! pgrep -f "ngrok start" > /dev/null; then
-        echo -e "${YELLOW}⚠️  ngrok stopped. Killing any stale processes and restarting...${NC}"
-        # Kill any existing ngrok processes first to avoid conflicts
-        pkill -f "ngrok" 2>/dev/null || true
-        sleep 2
-        start_ngrok
-    fi
+    # Check ngrok status if enabled - DISABLED to prevent restart loops
+    # if [[ "$SKIP_NGROK" != "true" ]] && ! pgrep -f "ngrok" > /dev/null; then
+    #     echo -e "${YELLOW}⚠️  ngrok stopped. Killing any stale processes and restarting...${NC}"
+    #     # Kill any existing ngrok processes first to avoid conflicts
+    #     pkill -f "ngrok" 2>/dev/null || true
+    #     sleep 2
+    #     start_ngrok
+    # fi
 done
 
 echo -e "${RED}💥 One or more services failed. Exiting...${NC}"
