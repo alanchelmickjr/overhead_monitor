@@ -14,12 +14,11 @@
       "hardware": ["m4", "xavier", "cpu"],
       "recommended_for": ["real-time", "edge-devices"],
       "endpoints": {
-        "gguf": {
-          "model": "SmolVLM-500M-Instruct-Q8_0.gguf",
-          "mmproj": "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
+        "hf": {
+          "model_id": "ggml-org/SmolVLM-500M-Instruct-GGUF"
         },
         "api": {
-          "model": "smolvlm-instruct"
+          "model": "smolvlm-500m"
         }
       },
       "parameters": {
@@ -46,12 +45,11 @@
       "hardware": ["xavier", "m4-high-mem"],
       "recommended_for": ["balanced", "production"],
       "endpoints": {
-        "gguf": {
-          "model": "ggml-model-q4_k.gguf",
-          "mmproj": "mmproj-model-f16.gguf"
+        "hf": {
+          "model_id": "ggml-org/gemma-3-4b-it-GGUF"
         },
         "api": {
-          "model": "llava-v1.5-7b"
+          "model": "gemma-3-4b"
         }
       },
       "parameters": {
@@ -78,12 +76,11 @@
       "hardware": ["xavier-high-mem"],
       "recommended_for": ["high-accuracy", "training-data"],
       "endpoints": {
-        "gguf": {
-          "model": "llava-v1.5-13b-Q4_K.gguf",
-          "mmproj": "llava-v1.5-13b-mmproj-f16.gguf"
+        "hf": {
+          "model_id": "ggml-org/gemma-3-12b-it-GGUF"
         },
         "api": {
-          "model": "llava-v1.5-13b"
+          "model": "gemma-3-12b"
         }
       },
       "parameters": {
@@ -110,12 +107,11 @@
       "hardware": ["m4", "xavier"],
       "recommended_for": ["robot-specific", "production"],
       "endpoints": {
-        "gguf": {
-          "model": "custom-robot-detector.gguf",
-          "mmproj": "custom-robot-mmproj.gguf"
+        "hf": {
+          "model_id": "ggml-org/Qwen2-VL-2B-Instruct-GGUF"
         },
         "api": {
-          "model": "custom-robot-detector"
+          "model": "qwen2-vl-2b"
         }
       },
       "parameters": {

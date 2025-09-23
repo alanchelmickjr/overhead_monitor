@@ -15,6 +15,7 @@ set -e  # Exit on error
 # Parse command line arguments
 DEBUG_MODE=false
 SHOW_HELP=false
+MODEL_OVERRIDE=""
 
 for arg in "$@"; do
     case $arg in
@@ -25,6 +26,10 @@ for arg in "$@"; do
         -h|--help)
             SHOW_HELP=true
             shift
+            ;;
+        -m|--model)
+            MODEL_OVERRIDE="$2"
+            shift 2
             ;;
         *)
             ;;
@@ -38,18 +43,46 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Usage: ./start-all.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  -d, --debug    Enable debug output (verbose logging)"
-    echo "  -h, --help     Show this help message"
+    echo "  -d, --debug         Enable debug output (verbose logging)"
+    echo "  -m, --model MODEL   Specify the model to use (default: SmolVLM-500M)"
+    echo "  -h, --help          Show this help message"
+    echo ""
+    echo "Available Models:"
+    echo "  SmolVLM Models (default):"
+    echo "    ggml-org/SmolVLM-500M-Instruct-GGUF    (default, fast)"
+    echo "    ggml-org/SmolVLM-256M-Instruct-GGUF    (smaller)"
+    echo "    ggml-org/SmolVLM2-2.2B-Instruct-GGUF   (larger, better)"
+    echo ""
+    echo "  Other Vision Models:"
+    echo "    ggml-org/gemma-3-4b-it-GGUF"
+    echo "    ggml-org/gemma-3-12b-it-GGUF"
+    echo "    ggml-org/pixtral-12b-GGUF"
+    echo "    ggml-org/Qwen2-VL-2B-Instruct-GGUF"
+    echo "    ggml-org/Qwen2-VL-7B-Instruct-GGUF"
+    echo "    ggml-org/Qwen2.5-VL-3B-Instruct-GGUF"
+    echo "    ggml-org/Qwen2.5-VL-7B-Instruct-GGUF"
     echo ""
     echo "Examples:"
-    echo "  ./start-all.sh          # Start in quiet mode (default)"
-    echo "  ./start-all.sh --debug  # Start with debug output enabled"
+    echo "  ./start-all.sh                          # Use default SmolVLM-500M"
+    echo "  ./start-all.sh --debug                  # Start with debug output"
+    echo "  ./start-all.sh -m ggml-org/gemma-3-4b-it-GGUF  # Use Gemma 3 4B"
+    echo ""
+    echo "  # Or use environment variable:"
+    echo "  MODEL='ggml-org/SmolVLM2-2.2B-Instruct-GGUF' ./start-all.sh"
     echo ""
     exit 0
 fi
 
-# Export DEBUG environment variable for Node.js processes
+# Model selection - prioritize command line, then env var, then default to SmolVLM-500M
+if [ -n "$MODEL_OVERRIDE" ]; then
+    MODEL="$MODEL_OVERRIDE"
+elif [ -z "$MODEL" ]; then
+    MODEL="ggml-org/SmolVLM-500M-Instruct-GGUF"
+fi
+
+# Export environment variables for Node.js processes
 export DEBUG=$DEBUG_MODE
+export VISION_MODEL=$MODEL
 
 # Colors for output
 RED='\033[0;31m'
@@ -61,6 +94,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}🦜 Starting LeKiwi Pen Nanny Cam System...${NC}"
+echo -e "${PURPLE}🤖 Using model: $MODEL${NC}"
 if [ "$DEBUG_MODE" = true ]; then
     echo -e "${YELLOW}🔍 Debug mode enabled${NC}"
 fi
@@ -272,43 +306,8 @@ install_llama_cpp() {
     log_success "llama.cpp installed: $LLAMA_SERVER_PATH"
 }
 
-# Download models if missing
-download_models() {
-    MODEL_DIR="$HOME/models"
-    mkdir -p "$MODEL_DIR/smolvlm"
-    
-    # Define model paths
-    CACHE_MODEL="$HOME/Library/Caches/llama.cpp/ggml-org_SmolVLM-500M-Instruct-GGUF_SmolVLM-500M-Instruct-Q8_0.gguf"
-    CACHE_MMPROJ="$HOME/Library/Caches/llama.cpp/ggml-org_SmolVLM-500M-Instruct-GGUF_mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
-    LOCAL_MODEL="$MODEL_DIR/smolvlm/ggml-model-q4_k.gguf"
-    LOCAL_MMPROJ="$MODEL_DIR/smolvlm/mmproj-model-f16.gguf"
-    
-    # Check if models exist
-    if [ -f "$CACHE_MODEL" ] && [ -f "$CACHE_MMPROJ" ]; then
-        MODEL_PATH="$CACHE_MODEL"
-        MMPROJ_PATH="$CACHE_MMPROJ"
-        log_success "Models found in cache"
-    elif [ -f "$LOCAL_MODEL" ] && [ -f "$LOCAL_MMPROJ" ]; then
-        MODEL_PATH="$LOCAL_MODEL"
-        MMPROJ_PATH="$LOCAL_MMPROJ"
-        log_success "Models found locally"
-    else
-        log_debug "Downloading LLaVA 1.5 models (more stable than SmolVLM)..."
-        
-        # Install wget if missing on macOS
-        if [[ "$SYSTEM" == "macos" ]] && ! command -v wget &> /dev/null; then
-            brew install wget
-        fi
-        
-        # Download LLaVA 1.5 models (known to work with llama.cpp)
-        wget -O "$LOCAL_MODEL" "https://huggingface.co/mys/ggml_llava-v1.5-7b/resolve/main/ggml-model-q4_k.gguf"
-        wget -O "$LOCAL_MMPROJ" "https://huggingface.co/mys/ggml_llava-v1.5-7b/resolve/main/mmproj-model-f16.gguf"
-        
-        MODEL_PATH="$LOCAL_MODEL"
-        MMPROJ_PATH="$LOCAL_MMPROJ"
-        log_success "Models downloaded"
-    fi
-}
+# No longer need to download models - using -hf flag to load from Hugging Face
+# Models are automatically cached by llama.cpp
 
 # Install Node.js dependencies
 install_node_deps() {
@@ -357,7 +356,7 @@ log_debug "Checking and installing dependencies..."
 detect_system
 check_ngrok
 install_llama_cpp
-download_models
+# download_models removed - using -hf flag now
 install_node_deps
 
 # Kill any existing processes
@@ -371,12 +370,30 @@ pkill -9 -f "ngrok" || true
 # Wait for processes to fully terminate
 sleep 3
 
-# Start llama.cpp server directly
-echo -e "${BLUE}🤖 Starting llama.cpp server...${NC}"
+# Start llama.cpp server with model
+echo -e "${BLUE}🤖 Starting llama.cpp server with model: ${PURPLE}$MODEL${NC}"
+
+# Check if we have cached model files for SmolVLM
+CACHE_DIR="$HOME/Library/Caches/llama.cpp"
+USE_CACHED=false
+
+if [[ "$MODEL" == "ggml-org/SmolVLM-500M-Instruct-GGUF" ]]; then
+    CACHED_MODEL="$CACHE_DIR/ggml-org_SmolVLM-500M-Instruct-GGUF_SmolVLM-500M-Instruct-Q8_0.gguf"
+    CACHED_MMPROJ="$CACHE_DIR/ggml-org_SmolVLM-500M-Instruct-GGUF_mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
+    
+    if [ -f "$CACHED_MODEL" ] && [ -f "$CACHED_MMPROJ" ]; then
+        log_success "Using cached SmolVLM model files"
+        USE_CACHED=true
+    fi
+fi
+
 if [ "$DEBUG_MODE" = true ]; then
     echo -e "${GREEN}Using llama-server: $LLAMA_SERVER_PATH${NC}"
-    echo -e "${GREEN}Using model: $MODEL_PATH${NC}"
-    echo -e "${GREEN}Using mmproj: $MMPROJ_PATH${NC}"
+    if [ "$USE_CACHED" = true ]; then
+        echo -e "${GREEN}Using cached model files${NC}"
+    else
+        echo -e "${GREEN}Loading model from Hugging Face: $MODEL${NC}"
+    fi
 fi
 
 # Check if port 8080 is already in use
@@ -386,25 +403,46 @@ if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
     sleep 2
 fi
 
-# Start llama.cpp server with LLaVA-optimized parameters
-# Only add --verbose flag if in debug mode
-LLAMA_ARGS=(
-    --model "$MODEL_PATH"
-    --mmproj "$MMPROJ_PATH"
-    --host 0.0.0.0
-    --port 8080
-    --ctx-size 4096
-    --threads 4
-    --gpu-layers 32
-    --batch-size 512
-    --ubatch-size 512
-)
+# Build llama-server arguments
+if [ "$USE_CACHED" = true ]; then
+    # Use cached model files directly
+    LLAMA_ARGS=(
+        --model "$CACHED_MODEL"
+        --mmproj "$CACHED_MMPROJ"
+        --host 0.0.0.0
+        --port 8080
+        --ctx-size 4096
+        --threads 4
+        --gpu-layers 32
+        --batch-size 512
+        --ubatch-size 512
+    )
+else
+    # Use -hf flag for Hugging Face models
+    LLAMA_ARGS=(
+        -hf "$MODEL"
+        --host 0.0.0.0
+        --port 8080
+        --ctx-size 4096
+        --threads 4
+        --gpu-layers 32
+        --batch-size 512
+        --ubatch-size 512
+    )
+    log_info "Model will be automatically downloaded from Hugging Face if not cached..."
+fi
 
 if [ "$DEBUG_MODE" = true ]; then
     LLAMA_ARGS+=(--verbose)
 fi
 
-"$LLAMA_SERVER_PATH" "${LLAMA_ARGS[@]}" &
+"$LLAMA_SERVER_PATH" "${LLAMA_ARGS[@]}" 2>&1 | while read -r line; do
+    # Filter out the chat template error but keep other output
+    if [[ ! "$line" =~ "Failed to generate tool call example" ]] && \
+       [[ ! "$line" =~ "Value is not callable" ]]; then
+        echo "$line"
+    fi
+done &
 
 LLAMA_PID=$!
 echo "llama-server started with PID: $LLAMA_PID"
@@ -479,7 +517,7 @@ echo -e "${GREEN}📱 Local Access Points:${NC}"
 echo "   • Internal Control (PRIVATE): http://localhost:3000"
 echo "   • Public Viewer (SHARED): http://localhost:4040"
 echo "   • Frontier Tower: http://localhost:8000"
-echo "   • LLaVA API: http://localhost:8080/v1/chat/completions"
+echo "   • Vision API: http://localhost:8080/v1/chat/completions"
 if [[ "$SKIP_NGROK" != "true" ]]; then
     echo "   • ngrok dashboard: http://localhost:4040"
 fi
@@ -493,6 +531,8 @@ if [[ "$SKIP_NGROK" != "true" ]]; then
 fi
 
 echo -e "${GREEN}✨ Multi-Model Features:${NC}"
+echo "   • Current model: $MODEL"
+echo "   • Change model: Use -m flag or MODEL env var"
 echo "   • Model switching: Use dropdown in header"
 echo "   • Benchmark models: Click ⚡ button"
 echo "   • Compare models: Click 📊 button"
