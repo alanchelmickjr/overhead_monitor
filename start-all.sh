@@ -403,9 +403,15 @@ if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
     sleep 2
 fi
 
+# Create a simple chat template for SmolVLM that works with llama.cpp
+# This avoids the 'capitalize' filter issue
+CHAT_TEMPLATE='<|im_start|>{% for message in messages %}{% if message["role"] == "user" %}user: {% for item in message["content"] %}{% if item["type"] == "text" %}{{ item["text"] }}{% elif item["type"] == "image_url" %}<image>{% endif %}{% endfor %}<|im_end|>
+{% elif message["role"] == "assistant" %}assistant: {{ message["content"] }}<|im_end|>
+{% endif %}{% endfor %}{% if add_generation_prompt %}assistant: {% endif %}'
+
 # Build llama-server arguments
 if [ "$USE_CACHED" = true ]; then
-    # Use cached model files directly
+    # Use cached model files directly with custom template
     LLAMA_ARGS=(
         --model "$CACHED_MODEL"
         --mmproj "$CACHED_MMPROJ"
@@ -416,9 +422,10 @@ if [ "$USE_CACHED" = true ]; then
         --gpu-layers 32
         --batch-size 512
         --ubatch-size 512
+        --chat-template "$CHAT_TEMPLATE"
     )
 else
-    # Use -hf flag for Hugging Face models
+    # Use -hf flag for Hugging Face models with custom template
     LLAMA_ARGS=(
         -hf "$MODEL"
         --host 0.0.0.0
@@ -428,6 +435,7 @@ else
         --gpu-layers 32
         --batch-size 512
         --ubatch-size 512
+        --chat-template "$CHAT_TEMPLATE"
     )
     log_info "Model will be automatically downloaded from Hugging Face if not cached..."
 fi
